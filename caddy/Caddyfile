@@ -1,0 +1,89 @@
+# Reverse proxy for WebApp Production, Beta, and phpMyAdmin.
+# Install Caddy on the host, then copy this file to /etc/caddy/Caddyfile and reload Caddy.
+# SSL certificates are obtained and renewed automatically by Caddy (Let's Encrypt).
+
+app.josh.me.uk, app.jb-vpn.uk {
+	reverse_proxy 127.0.0.1:8008
+}
+
+app-beta.josh.me.uk {
+	reverse_proxy 127.0.0.1:8009
+}
+
+app-db.josh.me.uk {
+	reverse_proxy 127.0.0.1:8080
+	# Restrict phpMyAdmin access (uncomment and set user/password):
+	# basicauth /* {
+	#   admin $2a$14$...  # caddy hash-password
+	# }
+}
+
+# dsm.jb-vpn.uk – reverse proxy to Synology DSM (HTTPS, internal VPN)
+dsm.jb-vpn.uk {
+	reverse_proxy https://10.8.0.2:5001 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Upgrade {http.request.header.Upgrade}
+		header_up Connection {http.request.header.Connection}
+	}
+}
+
+# plex.jb-vpn.uk – reverse proxy to Plex on Synology
+plex.jb-vpn.uk {
+	reverse_proxy http://10.8.0.2:32400 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Plex-Client-Identifier {http.request.header.X-Plex-Client-Identifier}
+		header_up X-Plex-Device {http.request.header.X-Plex-Device}
+		header_up X-Plex-Product {http.request.header.X-Plex-Product}
+		header_up X-Plex-Version {http.request.header.X-Plex-Version}
+		header_up X-Plex-Platform {http.request.header.X-Plex-Platform}
+		header_up X-Plex-Platform-Version {http.request.header.X-Plex-Platform-Version}
+		header_up X-Plex-Device-Name {http.request.header.X-Plex-Device-Name}
+		header_up X-Plex-Provides {http.request.header.X-Plex-Provides}
+		header_up X-Plex-Token {http.request.header.X-Plex-Token}
+	}
+}
+
+# vps.jb-vpn.uk – static files from /var/www/html
+vps.jb-vpn.uk {
+	root * /var/www/html
+	file_server
+}
+
+# werbs-wiki.jb-vpn.uk – reverse proxy to Synology (port 8081)
+werbs-wiki.jb-vpn.uk {
+	reverse_proxy http://10.8.0.2:8081 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Upgrade {http.request.header.Upgrade}
+		header_up Connection {http.request.header.Connection}
+	}
+}
+
+# wiki.jb-vpn.uk – reverse proxy to Synology (port 8080)
+wiki.jb-vpn.uk {
+	reverse_proxy http://10.8.0.2:8080 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Upgrade {http.request.header.Upgrade}
+		header_up Connection {http.request.header.Connection}
+	}
+}
+
+# Default server (unknown Host or IP) – serve /var/www/html on port 80
+http:// {
+	root * /var/www/html
+	file_server
+}
