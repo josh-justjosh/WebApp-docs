@@ -20,7 +20,13 @@ App code is mounted from the host in each directory, so many updates only need p
 - `docker` and `docker compose` available
 - **WebAppDb stack running first** so the `webapp-shared` network and `webapp-db` container exist (see [Shared database stack (WebAppDb)](#shared-database-stack-webappdb))
 - Repository at `/root/WebApp` (Production) and `/root/WebAppBeta` (Beta), or adjust paths below
-- `.env` configured in each app directory (database credentials, `APP_KEY`, `APP_URL`, etc.)
+- In each app directory: `docker-compose.yml` (copy from `docker-compose.example.yml` if missing) and `.env` (database credentials, `APP_KEY`, `APP_URL`, etc.)
+
+## Docker Compose and .env
+
+- **`docker-compose.yml`** is **not** committed (it is in `.gitignore`). In each app stack directory (e.g. `/root/WebApp`, `/root/WebAppBeta`), copy the template once: `cp docker-compose.example.yml docker-compose.yml`. You can then edit `docker-compose.yml` per environment (container names, ports, volumes) if needed. It does not contain secrets.
+- **App and DB config** (e.g. `APP_ENV`, `APP_URL`, `DB_DATABASE`, `DB_PASSWORD`) belong in **`.env`**. Copy from `.env.example` and set values per environment. Production typically uses `APP_ENV=production`, `APP_URL=https://app.josh.me.uk`, `DB_DATABASE=laravel_production` (or `laravel`); Beta uses `APP_ENV=beta`, `APP_URL=https://app-beta.josh.me.uk`, `DB_DATABASE=laravel_beta`. Docker Compose reads `.env` and passes these into the containers; the defaults in `docker-compose.yml` are fallbacks only.
+- **`docker-compose.example.yml`** is committed as the template. Copy it to `docker-compose.yml` before first run (see above).
 
 ## Startup order
 
