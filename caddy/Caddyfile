@@ -1,5 +1,5 @@
 # Reverse proxy for WebApp Production, Beta, and phpMyAdmin.
-# Install Caddy on the host, then copy this file to /etc/caddy/Caddyfile and reload Caddy.
+# Install Caddy on the host, then copy this file to your Caddy config and reload Caddy.
 # SSL certificates are obtained and renewed automatically by Caddy (Let's Encrypt).
 
 app.josh.me.uk, app.jb-vpn.uk {

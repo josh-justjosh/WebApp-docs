@@ -1,5 +1,33 @@
 # Troubleshooting
 
+## API 500 "Invalid key supplied" (LogicException in CryptKey)
+
+If `/api/profile` or other API routes return 500 with:
+
+```json
+{"error":"LogicException","message":"Invalid key supplied","file":".../CryptKey.php","line":67}
+```
+
+Laravel Passport’s encryption keys are missing. Generate them and (if needed) install clients:
+
+**Local / single server:**
+```bash
+cd beta   # or your app directory
+php artisan passport:keys
+# If this is a fresh install and you also need OAuth clients:
+php artisan passport:install
+```
+
+**Docker (beta/production):** run inside the app container so keys are created in the container’s `storage/` (and persist if that directory is a volume):
+
+```bash
+docker compose exec app php artisan passport:keys
+# Optional, for fresh install:
+docker compose exec app php artisan passport:install
+```
+
+Keys are written to `storage/oauth-private.key` and `storage/oauth-public.key`. Alternatively set `PASSPORT_PRIVATE_KEY` and `PASSPORT_PUBLIC_KEY` in `.env` (full PEM contents; use `\n` for newlines) and no key files are needed.
+
 ## `composer install` (Windows / local PHP)
 
 If `composer install` fails with missing extensions or PHP version errors:
