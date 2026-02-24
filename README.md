@@ -4,6 +4,7 @@ Central documentation for the WebApp (Laravel + Vue) project: deployment, status
 
 ## Contents
 
+- **[AgentContext.md](AgentContext.md)** – Environment and conventions for AI agents.
 - **[deployment.md](deployment.md)** – Deploying updates to Production and Beta (Docker), Caddy, WebAppDb, Laravel scheduler, berth meanings, rollback.
 - **[deploy-status.md](deploy-status.md)** – Current deploy status, URLs, and useful commands.
 - **[troubleshooting.md](troubleshooting.md)** – Composer, PHP, profile upload (413), unit tests.

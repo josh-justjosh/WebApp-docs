@@ -7,7 +7,11 @@ For current status and URLs, see [deploy-status.md](deploy-status.md).
 ## Overview
 
 Production and Beta each run as separate Docker Compose stacks **without** a local `db` service. The shared MariaDB 11 server and phpMyAdmin run in the **`db/`** stack. Both app stacks connect to it over the Docker network `webapp-shared`. Production uses database **`laravel_production`** (or **`laravel`** when reusing the existing DB volume); Beta uses **`laravel_beta`**.
+Production and Beta each run as separate Docker Compose stacks **without** a local `db` service. The shared MariaDB 11 server and phpMyAdmin run in the **`db/`** stack. Both app stacks connect to it over the Docker network `webapp-shared`. Production uses database **`laravel_production`** (or **`laravel`** when reusing the existing DB volume); Beta uses **`laravel_beta`**.
 
+- **Production** (`production/`): **app** (container `webapp-php`), **nginx** (port 8008), **td-trust-worker**
+- **Beta** (`beta/`): **app** (container `webapp-beta-php`), **nginx** (port 8009), **td-trust-worker**
+- **Shared DB** (`db/`): **db** (MariaDB 11, container `webapp-db`), **phpMyAdmin** (port 8080)
 - **Production** (`production/`): **app** (container `webapp-php`), **nginx** (port 8008), **td-trust-worker**
 - **Beta** (`beta/`): **app** (container `webapp-beta-php`), **nginx** (port 8009), **td-trust-worker**
 - **Shared DB** (`db/`): **db** (MariaDB 11, container `webapp-db`), **phpMyAdmin** (port 8080)
@@ -21,12 +25,31 @@ App code is mounted from the host in each directory, so many updates only need p
 - **WebAppDb stack running first** so the `webapp-shared` network and `webapp-db` container exist (see [Shared database stack (WebAppDb)](#shared-database-stack-webappdb))
 - This repo (or a clone) with **production/** and **beta/** app stacks and **db/** for the shared database
 - `.env` configured in each app directory (database credentials, `APP_KEY`, `APP_URL`, etc.)
+- This repo (or a clone) with **production/** and **beta/** app stacks and **db/** for the shared database
+- In each app directory: `docker-compose.yml` (copy from `docker-compose.example.yml` if missing) and `.env` (database credentials, `APP_KEY`, `APP_URL`, etc.)
 
 ## Docker Compose and .env
 
 - **`docker-compose.yml`** is **committed** to the repo in each stack directory (`production/`, `beta/`, `db/`). It defines services, container names, ports, and volume names; it does not contain secrets. Do **not** add `docker-compose.yml` to `.gitignore`.
 - **App and DB config** (e.g. `APP_ENV`, `APP_URL`, `DB_DATABASE`, `DB_PASSWORD`) belong in **`.env`**. Copy from `.env.example` and set values per environment. Each stack has its own example: **production/.env.example** uses production defaults (`APP_ENV=production`, `APP_URL=https://app.josh.me.uk`, `DB_DATABASE=laravel_production`); **beta/.env.example** uses beta defaults (`APP_ENV=beta`, `APP_URL=https://app-beta.josh.me.uk`, `DB_DATABASE=laravel_beta`). Docker Compose reads `.env` and passes these into the containers; the defaults in `docker-compose.yml` are fallbacks only.
 - **`docker-compose.example.yml`** in each stack directory is a reference/template shown on GitHub. Use it to see the canonical layout or to create a local override; the real `docker-compose.yml` is the one in the repo.
+- **`docker-compose.yml`** is **not** committed (it is in `.gitignore`). In each app stack directory (`production/`, `beta/`), copy the template once: `cp docker-compose.example.yml docker-compose.yml`. You can then edit `docker-compose.yml` per environment (container names, ports, volumes) if needed. It does not contain secrets.
+- **App and DB config** (e.g. `APP_ENV`, `APP_URL`, `DB_DATABASE`, `DB_PASSWORD`) belong in **`.env`**. Copy from `.env.example` and set values per environment. Production typically uses `APP_ENV=production`, `APP_URL=https://app.josh.me.uk`, `DB_DATABASE=laravel_production` (or `laravel`); Beta uses `APP_ENV=beta`, `APP_URL=https://app-beta.josh.me.uk`, `DB_DATABASE=laravel_beta`. Docker Compose reads `.env` and passes these into the containers; the defaults in `docker-compose.yml` are fallbacks only.
+- **`docker-compose.example.yml`** is committed as the template. Copy it to `docker-compose.yml` before first run (see above).
+
+### Shared storage (Beta and Production)
+
+Data that must be the same across instances (e.g. profile photos, whose paths live in the shared DB) is stored under `storage/app/public/shared`. The template mounts an external volume at that path so **both** Beta and Production use the same files.
+
+**One-time setup:** Create the volume once (e.g. on the same host as both stacks):
+
+```bash
+docker volume create webapp-shared-storage
+```
+
+Ensure **both** Production and Beta `docker-compose.yml` include the same volume mount (they do if you copied from the current `docker-compose.example.yml`). Then restart both stacks so they use the shared volume.
+
+**If production already has files under shared** (e.g. profile photos) and you are adding the shared volume for the first time: copy existing files from production’s storage into the new volume before switching, e.g. run a one-off container that mounts both production storage and the shared volume, then `cp -a` from `storage/app/public/shared` (or `storage/app/public/profile-photos` for legacy paths) into the shared mount. New uploads from either environment will then be visible in both.
 
 ## Startup order
 
@@ -167,6 +190,8 @@ The app schedules `opentrack:refresh-scoreboard` every 2 minutes (see `bootstrap
 
 1. From the host (where Docker runs), add **two** cron entries so both Production and Beta run the Laravel scheduler every minute:
 
+   **Production:**
+   ```bash
    **Production:** from the production directory, e.g.  
    `* * * * * cd production && ./scripts/run-schedule.sh >> schedule.log 2>&1`
 
