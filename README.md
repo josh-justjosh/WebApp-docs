@@ -5,6 +5,7 @@ Central documentation for the WebApp (Laravel + Vue) project: deployment, status
 ## Contents
 
 - **[publishing-docs.md](publishing-docs.md)** – How to commit doc changes here, push WebApp-docs, and bump the `docs/` submodule in WebApp (`beta` / `main`).
+- **[syncing-branches.md](syncing-branches.md)** – Reconcile `beta` and `main` after parallel commits (merge workflow and when to reset).
 - **[AgentContext.md](AgentContext.md)** – Environment and conventions for AI agents.
 - **[deployment.md](deployment.md)** – Deploying updates to Production and Beta (Docker), Caddy, WebAppDb, Laravel scheduler, berth meanings, rollback.
 - **[deploy-status.md](deploy-status.md)** – Current deploy status, URLs, and useful commands.
