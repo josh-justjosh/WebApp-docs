@@ -7,8 +7,9 @@
 | Item | Status |
 |------|--------|
 | Shared DB stack (WebAppDb: MariaDB + phpMyAdmin) | ✅ Configured |
-| Production stack (app, nginx, td-trust-worker) | ✅ Configured |
-| Beta stack (app, nginx, td-trust-worker) | ✅ Configured |
+| Production stack (app, nginx) | ✅ Configured |
+| Beta stack (app, nginx) | ✅ Configured |
+| Network Rail data stack (`network-rail-data`: feed-worker, nr-maintenance on `webapp-shared`) | Per-host; see [network-rail-data/README.md](../../network-rail-data/README.md) |
 | Composer / Laravel (migrate, passport, storage:link) | Per-environment |
 | Vite frontend build (`public/build/`) | Per-environment |
 | App Production on port 8008 | Expect HTTP 200 |

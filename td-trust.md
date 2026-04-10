@@ -1,6 +1,6 @@
 # Network Rail TD/TRUST feed worker
 
-This worker connects to [Network Rail's open data feeds](https://wiki.openraildata.com/index.php/About_the_Network_Rail_feeds) (STOMP), receives TD (Train Describer) and/or TRUST (Train Movements) messages, and forwards them to the webapp API.
+The worker lives in [`network-rail-data`](../../network-rail-data): it connects to [Network Rail's open data feeds](https://wiki.openraildata.com/index.php/About_the_Network_Rail_feeds) (STOMP), receives TD (Train Describer) and/or TRUST (Train Movements) messages, and **writes them directly to MySQL** (`` `jb.app_network_rail` ``).
 
 ## Good practice (Open Rail Data wiki)
 
@@ -23,18 +23,10 @@ References:
 
 - `NETWORK_RAIL_FEED_EMAIL` – Feed account email (required).
 - `NETWORK_RAIL_FEED_PASSWORD` – Feed account password (required).
-- `WEBAPP_URL` – Base URL of the webapp (e.g. `http://nginx:80`) for posting messages; omit to only print to stdout.
-- `WEBAPP_FEED_SECRET` – Secret for `X-Feed-Secret` when posting to the webapp; omit if not posting.
+- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` – Target database (see [`network-rail-data/README.md`](../../network-rail-data/README.md)).
 - `FEED_TYPE` – `td`, `trust`, or `both` (default: `both`).
 - `DURABLE` – Set to `1` (or `true`/`yes`) to use a durable subscription.
 
 ## Run
 
-```bash
-pip install -r requirements.txt
-python main.py
-# Optional: durable subscription
-python main.py --durable
-```
-
-In Docker, the webapp `docker-compose` runs this worker as the `td-trust-worker` service.
+See [`network-rail-data`](../../network-rail-data): `docker compose up -d --build` on the `webapp-shared` network.

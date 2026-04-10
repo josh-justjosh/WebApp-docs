@@ -7,14 +7,11 @@ For current status and URLs, see [deploy-status.md](deploy-status.md).
 ## Overview
 
 Production and Beta each run as separate Docker Compose stacks **without** a local `db` service. The shared MariaDB 11 server and phpMyAdmin run in the **`db/`** stack. Both app stacks connect to it over the Docker network `webapp-shared`. Production uses database **`laravel_production`** (or **`laravel`** when reusing the existing DB volume); Beta uses **`laravel_beta`**.
-Production and Beta each run as separate Docker Compose stacks **without** a local `db` service. The shared MariaDB 11 server and phpMyAdmin run in the **`db/`** stack. Both app stacks connect to it over the Docker network `webapp-shared`. Production uses database **`laravel_production`** (or **`laravel`** when reusing the existing DB volume); Beta uses **`laravel_beta`**.
 
-- **Production** (`production/`): **app** (container `webapp-php`), **nginx** (port 8008), **td-trust-worker**
-- **Beta** (`beta/`): **app** (container `webapp-beta-php`), **nginx** (port 8009), **td-trust-worker**
+- **Production** (`production/`): **app** (container `webapp-php`), **nginx** (port 8008)
+- **Beta** (`beta/`): **app** (container `webapp-beta-php`), **nginx** (port 8009)
 - **Shared DB** (`db/`): **db** (MariaDB 11, container `webapp-db`), **phpMyAdmin** (port 8080)
-- **Production** (`production/`): **app** (container `webapp-php`), **nginx** (port 8008), **td-trust-worker**
-- **Beta** (`beta/`): **app** (container `webapp-beta-php`), **nginx** (port 8009), **td-trust-worker**
-- **Shared DB** (`db/`): **db** (MariaDB 11, container `webapp-db`), **phpMyAdmin** (port 8080)
+- **Network Rail data** ([`network-rail-data`](../../network-rail-data)): **feed-worker** and **nr-maintenance** on `webapp-shared` (separate compose; start with `cd network-rail-data && docker compose up -d`)
 
 App code is mounted from the host in each directory, so many updates only need pull + migrations + frontend build, without rebuilding images.
 
@@ -223,7 +220,7 @@ Otherwise the scheduler still runs but logs "skipped" (e.g. "No recent scoreboar
 
 ## Transferring the berth meanings table to production
 
-The **berth meanings** table (`network_rail_berth_meanings`) holds berth-code tooltips for the Network Rail area. The table is created by migrations; the **data** is not seeded. To copy data from another environment (e.g. local/dev) to production:
+The **berth meanings** table (`berth_meanings` in the dedicated Network Rail schema `` `jb.app_network_rail` ``) holds berth-code tooltips for the Network Rail area. The table is created by migrations; the **data** is not seeded. To copy data from another environment (e.g. local/dev) to production:
 
 ### 1. Ensure production has the table
 
@@ -271,21 +268,26 @@ docker compose exec -T app php artisan berth-meanings:import /var/www/berth-mean
 
 Import is idempotent: existing rows are updated by `berth_code`, new rows are inserted. You can re-run the import after adding more meanings in the source environment.
 
-### Alternative: direct database copy
+### Alternative: direct database copy (Network Rail schema)
 
-If you have access to both databases, you can dump only the berth meanings table from the source and load it into production. From the **source** host (replace with your source DB credentials and host):
-
-```bash
-mysqldump -h SOURCE_HOST -u USER -p DATABASE network_rail_berth_meanings > berth_meanings.sql
-```
-
-On the **production** server, import into the shared DB (from the WebAppDb stack; use `laravel_production`, `laravel` (when reusing existing volume), or `laravel_beta` as needed):
+If you have access to both databases, you can dump only the berth meanings table from the source and load it into the destination. Both sides must use the Network Rail database (e.g. `` `jb.app_network_rail` ``) after migrations. From the **source** host:
 
 ```bash
-docker compose -f db/docker-compose.yml exec -T db mariadb -u root -p"${DB_PASSWORD}" laravel_production < berth_meanings.sql
+mysqldump -h SOURCE_HOST -u USER -p --no-tablespaces \
+  'jb.app_network_rail' berth_meanings > berth_meanings.sql
 ```
 
-(Use `laravel` instead of `laravel_production` if Production is using the existing DB volume. Or run from `db/` and use the db container name `webapp-db` if connecting from the host.) This copies IDs and timestamps; the Artisan import uses upsert by `berth_code` and does not preserve IDs.
+On the **destination** host (example: import via the `webapp-db` container from the `db/` stack):
+
+```bash
+docker compose -f db/docker-compose.yml exec -T db mariadb -u root -p"${DB_PASSWORD}" 'jb.app_network_rail' < berth_meanings.sql
+```
+
+This copies IDs and timestamps; the Artisan import uses upsert by `berth_code` and does not preserve IDs.
+
+### Copying area path configs, berth meanings, and SMART steps from production
+
+To copy all three reference tables in one step (same schema on source and target), see [network-rail-data/README.md](../../network-rail-data/README.md) (section *Copy reference data from production*). Typical pattern: `mysqldump` `area_path_configs`, `berth_meanings`, and `smart_steps` from production’s `` `jb.app_network_rail` `` and pipe or restore into the target database.
 
 ## When to run one-time setup again
 
