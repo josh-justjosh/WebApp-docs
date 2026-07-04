@@ -153,3 +153,42 @@ docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:w
 docker compose exec app php artisan test --filter=BusDepartures
 docker compose exec app php artisan test --filter=Bustimes
 ```
+
+## Invoicing and quotes
+
+See [invoicing-quotes.md](invoicing-quotes.md) for architecture. Common issues:
+
+### `/quotes/*` returns 404 but invoice pages work
+
+Quote routes may be missing from `routes/staff.php` after a partial restore while controllers remain. Confirm:
+
+```bash
+docker compose exec app php artisan route:list --name=quotes
+```
+
+Expect ~13 routes. Restore `QuoteController` import and the quote block in [routes/staff.php](../routes/staff.php) (see invoicing-quotes doc).
+
+### Section date or line notes not saving
+
+Schema migrations may not have run. **`npm run build` does not migrate.**
+
+```bash
+docker compose exec app php artisan migrate --force
+```
+
+Relevant columns: `invoice_sections.date`, `invoice_sections.show_date`, `invoice_lines.notes`.
+
+### PDF footer split across pages or wrong page numbers
+
+Layout is controlled in [pdf.blade.php](../resources/views/invoices/pdf.blade.php) and [InvoicePdfService.php](../app/Services/InvoicePdfService.php) (Browsershot footer for `Page X of Y`). Regenerate a preview after Blade/service changes; no frontend rebuild required unless Vue pages changed.
+
+### TypeScript errors on quote/invoice pages
+
+Ensure [resources/js/types/domain/index.ts](../resources/js/types/domain/index.ts) includes `InvoiceSection`, `QuoteRow`, and line `notes` / `show_date` fields — this file was reverted during a prior restore.
+
+### Tests
+
+```bash
+docker compose exec app php artisan test --filter=QuotesAndSections
+docker compose exec app php artisan test --filter=InvoiceLineShowFlags
+```

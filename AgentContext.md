@@ -18,7 +18,7 @@ This document summarizes the project stack, runtime environment, and learned pat
 
 - **Compose:** [docker-compose.yml](../docker-compose.yml) – app service builds from [docker/Dockerfile](../docker/Dockerfile), mounts `.` to `/var/www`, and uses named volumes for `storage`, `bootstrap/cache`, and shared storage.
 - **Vendor and build:** The Dockerfile does **not** run `composer install` or `npm run build`. It copies the repo (excluding `vendor/` and `node_modules/` via `.dockerignore`; both are bind-mounted at runtime). Run `composer install` and the frontend build at deploy time (see [deployment.md](deployment.md)).
-- **Invoice PDFs:** Generated with [Spatie Browsershot](https://github.com/spatie/browsershot) (Puppeteer/headless Chrome). Requires Node (in the app image), `puppeteer` in `package.json`, Chromium system libraries (installed in the Dockerfile), and a one-time `npx puppeteer browsers install chrome` into the `webapp-*-puppeteer-cache` volume. The Blade view `resources/views/invoices/pdf.blade.php` is rendered to HTML and passed to Browsershot for full CSS support.
+- **Invoice PDFs:** Generated with [Spatie Browsershot](https://github.com/spatie/browsershot) (Puppeteer/headless Chrome). Requires Node (in the app image), `puppeteer` in `package.json`, Chromium system libraries (installed in the Dockerfile), and a one-time `npx puppeteer browsers install chrome` into the `webapp-*-puppeteer-cache` volume. The Blade view `resources/views/invoices/pdf.blade.php` is rendered to HTML and passed to Browsershot for full CSS support. **Page numbers** (`Page X of Y`) use Browsershot’s Chrome footer template (`showBrowserHeaderAndFooter()` in [InvoicePdfService.php](../app/Services/InvoicePdfService.php)), not inline body HTML. Multi-page PDFs keep the business footer block (address, contact, notes) unsplit via print CSS and a small layout script — see [invoicing-quotes.md](invoicing-quotes.md#pdf-generation).
 - **Adding PHP packages / running Composer:** Composer is often **not installed on the host** (only inside the app container). Running `composer update` inside the app container (`docker compose exec app composer ...`) can also hit **permission denied** when writing `composer.lock` (container user `www` vs mount). Use a one-off Composer image with the project mounted so the lock and vendor are updated on the host:
   ```bash
   docker run --rm -v "$(pwd):/app" -w /app composer:latest composer update <package> --no-interaction
@@ -34,7 +34,7 @@ This document summarizes the project stack, runtime environment, and learned pat
 ## 3. Database
 
 - **Default:** Connection `mysql` uses `DB_*` (per-environment schema such as `laravel_beta` / `laravel_production` per `.env`). This is also where Laravel stores the **`migrations` table** for `php artisan migrate`.
-- **Shared DB:** If `DB_SHARED_DATABASE` is set, connection `mysql_shared` points at that schema (see [config/database.php](../config/database.php)). Tables such as `users`, `clients`, `invoices`, `invoice_lines`, `client_contacts`, `signalling_diagrams`, `admin_audit_logs`, **`rtt_access_tokens`**, and **`rtt_ref_*`** live there when models use `getConnectionName()` returning `mysql_shared` or the [UsesSharedDatabaseWhenConfigured](../app/Models/Concerns/UsesSharedDatabaseWhenConfigured.php) trait ([app/Models/Invoice.php](../app/Models/Invoice.php), [app/Models/RttAccessToken.php](../app/Models/RttAccessToken.php), [app/Models/RttRef/](../app/Models/RttRef/), etc.). Code that writes audit rows or spans connections must pick the connection explicitly, e.g. `env('DB_SHARED_DATABASE') ? 'mysql_shared' : config('database.default')` (see [UserManagementController](../app/Http/Controllers/UserManagementController.php)).
+- **Shared DB:** If `DB_SHARED_DATABASE` is set, connection `mysql_shared` points at that schema (see [config/database.php](../config/database.php)). Tables such as `users`, `clients`, `invoices`, `invoice_lines`, **`invoice_sections`**, **`quote_groups`**, `client_contacts`, `signalling_diagrams`, `admin_audit_logs`, **`rtt_access_tokens`**, and **`rtt_ref_*`** live there when models use `getConnectionName()` returning `mysql_shared` or the [UsesSharedDatabaseWhenConfigured](../app/Models/Concerns/UsesSharedDatabaseWhenConfigured.php) trait ([app/Models/Invoice.php](../app/Models/Invoice.php), [app/Models/RttAccessToken.php](../app/Models/RttAccessToken.php), [app/Models/RttRef/](../app/Models/RttRef/), etc.). Code that writes audit rows or spans connections must pick the connection explicitly, e.g. `env('DB_SHARED_DATABASE') ? 'mysql_shared' : config('database.default')` (see [UserManagementController](../app/Http/Controllers/UserManagementController.php)).
 - **Migrations vs live DB:** `migrate` replays any migration missing from **`migrations` on the default DB**—not from `mysql_shared`. If shared tables already exist but those rows are missing (restore, clone, hand-edited DB), plain `migrate` can try to recreate tables or columns and fail. Many shared migrations use `Schema::hasTable` / `hasColumn` guards so a replay no-ops safely; Network Rail migrations are different (always use `--database=mysql_network_rail` **and** `--path` per `*network_rail*.php` file). Moving diagrams to shared: [`2026_04_12_100000_move_signalling_diagrams_to_mysql_shared.php`](../database/migrations/2026_04_12_100000_move_signalling_diagrams_to_mysql_shared.php) runs on the default migrate batch (not the NR `--path` loop); it copies or drops the per-app `signalling_diagrams` copy as needed.
 - **Network Rail (dedicated schema):** Connection `mysql_network_rail` points at database `` `jb.app_network_rail` `` (see `DB_NETWORK_RAIL_*` in `.env`). Models live under [app/Models/NetworkRail/](../app/Models/NetworkRail/) with `$connection = 'mysql_network_rail'`; tables use **short names** (`feed_messages`, `berths`, `berth_meanings`, `area_path_configs`, `signal_states`, etc.). STOMP ingest and retention/SMART jobs run only in [`network-rail-data`](../../network-rail-data); Laravel exposes read APIs and CRUD for berth meanings / area path configs—**no** HTTP feed ingest in PHP. NR migrations: run with `--database=mysql_network_rail` **and** `--path` per file matching `database/migrations/*network_rail*.php` (see [network-rail-data/README.md](../../network-rail-data/README.md)); do not run bare `migrate` on that connection without `--path` or Laravel may run unrelated migrations.
 
@@ -45,12 +45,25 @@ This document summarizes the project stack, runtime environment, and learned pat
 - **Staff (session):** Fortify login/logout/2FA; authenticated pages under [routes/staff.php](../routes/staff.php) and [routes/settings.php](../routes/settings.php) with Inertia controllers in `app/Http/Controllers/Web/`. **Realtime Trains API playground** at `/rtt` ([RttController](../app/Http/Controllers/Web/RttController.php)) — see [rtt-api.md](rtt-api.md).
 - **Public OpenTrack scoreboard:** Token-gated JSON at `/public/opentrack/{OPENTRACK_PUBLIC_TOKEN}/…` ([PublicOpenTrackController](../app/Http/Controllers/Web/PublicOpenTrackController.php)); standalone scoreboard blades read the base URL from `<meta name="opentrack-public-api-base">`.
 - **Bus departures:** Staff UI at `/bus-departures`; public wall board at `/d/bus-departures` with token-gated poll at `/public/bus-departures/{BUSTIMES_PUBLIC_TOKEN}/poll`. See [bus-departures.md](bus-departures.md).
+- **Projects (invoices + quotes):** Unified index at `/invoices` (UI title **Projects**); quotes under `/quotes/*`. See [invoicing-quotes.md](invoicing-quotes.md).
 - **API:** [routes/api.php](../routes/api.php) exposes only `GET /api/version` for health checks. Legacy `API/V1` controllers were removed; staff features use Inertia web routes.
 - **Exception handling:** [bootstrap/app.php](../bootstrap/app.php) – for `api/*` requests, exceptions render as JSON 500. If `app.debug` is true, the body includes message, error class, file, and line. If `app.debug` is false, `GET api/invoices/*/pdf/preview` still returns message, class, file, and line (to debug PDF rendering); other routes return a generic `"Server Error"` unless the exception is a `QueryException` / `PDOException` (then the DB message is included).
 
 ---
 
-## 5. Invoice PDF import (learned behavior)
+## 5. Quotes and invoicing (learned behavior)
+
+Full reference: [invoicing-quotes.md](invoicing-quotes.md).
+
+- **Single model:** Quotes and invoices are both `Invoice` rows (`document_type`). Versioned quotes use `quote_groups` + `version` / `is_current_version`. Sections live in `invoice_sections`; lines in `invoice_lines` with optional `notes`, per-line and per-section dates, and PDF show flags.
+- **Editor:** [SectionedLineEditor.vue](../resources/js/components/invoices/SectionedLineEditor.vue) is shared by invoice and quote forms. Line notes use a sticky-note modal (not an inline table field). Section date defaults flow to new lines with line `show_date` off when the section has a date.
+- **PDF labels:** Supply date header is **Project Date**; section subtotals use **`{section title} total`**. Line notes render below the description.
+- **Deploy:** `php artisan migrate` and `npm run build` are **independent** — rebuilding assets does not apply migrations (e.g. `invoice_sections.date`, `invoice_lines.notes`).
+- **Restore gotcha:** After partial data loss, **PHP controllers/services may exist while `routes/staff.php` lost quote routes** — verify with `php artisan route:list --name=quotes`. Also restore `resources/js/types/domain/index.ts` (`QuoteRow`, `InvoiceSection`, line `notes`) if TypeScript types were reverted.
+
+---
+
+## 6. Invoice PDF import (learned behavior)
 
 - **Flow:** The user selects a PDF and a client in the UI; the frontend POSTs to `POST /invoices/import (Inertia web route `invoices.import`)` with only `file` and `client_id`. The backend runs [InvoicePdfExtractionService](../app/Services/InvoicePdfExtractionService.php) to extract number, dates, total, subtotal, currency, line items, and notes; then creates the invoice and lines and stores the PDF under `invoices/{id}.pdf` (Storage).
 - **Parser:** Uses `smalot/pdfparser` (`Smalot\PdfParser\Parser`). The extraction service is **not** injected in the controller constructor; it is resolved lazily via `app(InvoicePdfExtractionService::class)` only inside `extract()` and `import()`. That way `GET /api/invoices` (and other routes that do not need PDF parsing) never load the Parser class, avoiding 500s when the package is missing or autoload has not been run yet.
@@ -58,17 +71,18 @@ This document summarizes the project stack, runtime environment, and learned pat
 
 ---
 
-## 6. Frontend (relevant to agents)
+## 7. Frontend (relevant to agents)
 
 - **Entry:** Inertia app bootstrapped from [resources/js/app.ts](../resources/js/app.ts); pages under `resources/js/pages/`. Built with **Vite** into `public/build`.
 - **Tables:** `@tanstack/vue-table` is retained as a headless wrapper composing shadcn `Table` primitives — see [decisions/tanstack-vue-table.md](decisions/tanstack-vue-table.md).
-- **Invoice import UI:** [resources/js/components/invoices/InvoiceImportModal.vue](../resources/js/components/invoices/InvoiceImportModal.vue) – only a PDF file input and client selector; no manual fields (all from PDF). The invoices index page uses it and calls `POST /invoices/import (Inertia web route `invoices.import`)` with FormData (file + client_id).
+- **Invoice import UI:** [resources/js/components/invoices/InvoiceImportModal.vue](../resources/js/components/invoices/InvoiceImportModal.vue) – only a PDF file input and client selector; no manual fields (all from PDF). The Projects index page uses it and calls `POST /invoices/import` with FormData (file + client_id).
+- **Projects table:** [resources/js/pages/invoices/Index.vue](../resources/js/pages/invoices/Index.vue) uses [DataTable.vue](../resources/js/components/DataTable.vue) with `getRowHref` for row navigation and server pagination via `:paginator` + `pagination-only`.
 
 ---
 
-## 7. Conventions and gotchas
+## 8. Conventions and gotchas
 
-- **New staff features — wire everything:** Adding a page is not done when the controller and Vue file exist. Also update **`routes/staff.php`**, **`config/services.php`** (if env-backed), **`AppSidebar.vue`** (or relevant nav), and **`.env.example`**. After deploy or restore, run `php artisan route:list --path=…` to confirm routes. RTT lost wiring (routes/config/sidebar) while service files remained — see [rtt-api.md](rtt-api.md) checklist. Bus departures uses the same pattern — see [bus-departures.md](bus-departures.md#adding-or-changing-bus-departures--integration-checklist).
+- **New staff features — wire everything:** Adding a page is not done when the controller and Vue file exist. Also update **`routes/staff.php`**, **`config/services.php`** (if env-backed), **`AppSidebar.vue`** (or relevant nav), **`.env.example`**, and **`resources/js/types/domain/index.ts`** when API shapes change. After deploy or restore, run `php artisan route:list --path=…` to confirm routes. RTT lost wiring (routes/config/sidebar) while service files remained — see [rtt-api.md](rtt-api.md) checklist. Bus departures uses the same pattern — see [bus-departures.md](bus-departures.md#adding-or-changing-bus-departures--integration-checklist). **Quotes** lost all `/quotes/*` routes while controllers remained — see [invoicing-quotes.md](invoicing-quotes.md#routes-routesstaffphp).
 - **Shared DB data vs code:** Migrations can be applied while **row data** in `mysql_shared` is empty or truncated (restore, failed sync, test pollution). Re-seed domain-specific data via the feature’s sync command (e.g. `php artisan rtt:sync-reference-data --all` for RTT reference tables). **Bus departures PTP display rules** live in `bus_service_display_rules` on the default DB — re-enter via the service modal after a restore that omitted that table.
 - **Git branches:** App code: develop on **`beta`**, merge **`beta` → `main`** for production. **`docs/`** is a **submodule** ([WebApp-docs](https://github.com/josh-justjosh/WebApp-docs)); commit and push documentation changes from the `docs` checkout, then bump the submodule pointer on `beta`/`main` in the WebApp repo. Relative links in this file (e.g. `../docker/Dockerfile`) assume this markdown lives at **`WebApp/docs/…`** inside the WebApp working tree; they do not resolve when browsing the docs repo alone on GitHub.
 - **Rule/validation with shared DB:** When using `Rule::exists()` for tables that may be on the shared connection, pass the **model class** (e.g. `Rule::exists(Client::class, 'id')`) so Laravel’s rule uses the model’s connection. Do not chain `->connection(...)` on `Rule::exists()` — that method does not exist on the Exists rule.
@@ -77,17 +91,19 @@ This document summarizes the project stack, runtime environment, and learned pat
 
 ---
 
-## 8. File locations quick reference
+## 9. File locations quick reference
 
 | Area | Path |
 |------|------|
 | Web controllers | `app/Http/Controllers/Web/` (staff pages), `app/Http/Controllers/` (domain CRUD) |
-| Models | `app/Models/` (Invoice, InvoiceLine, Client, ClientContact, User, SignallingDiagram, RttAccessToken, BusServiceDisplayRule); Network Rail: `app/Models/NetworkRail/`; RTT ref: `app/Models/RttRef/` |
-| Services | `app/Services/` (InvoicePdfService, InvoicePdfExtractionService, InvoiceDateService, RttService, RttReferenceDataService, BustimesService, BusServiceDisplayRuleMatcher) |
+| Models | `app/Models/` (Invoice, InvoiceLine, InvoiceSection, QuoteGroup, Client, …); Network Rail: `app/Models/NetworkRail/`; RTT ref: `app/Models/RttRef/` |
+| Services | `app/Services/` (InvoiceService, QuoteService, InvoicePdfService, InvoicePdfExtractionService, RttService, BustimesService, …) |
+| Projects / quotes UI | `/invoices`, `/quotes/*` — [invoicing-quotes.md](invoicing-quotes.md); `resources/js/pages/invoices/`, `resources/js/pages/quotes/`, `SectionedLineEditor.vue` |
 | RTT API playground | `/rtt` — [rtt-api.md](rtt-api.md); `resources/js/pages/rtt/`, `resources/js/lib/rttApi.ts` |
-| Bus departures | `/bus-departures`, `/d/bus-departures` — [bus-departures.md](bus-departures.md); `app/Services/BustimesService.php`, `resources/js/pages/bus-departures/` |
+| Bus departures | `/bus-departures`, `/d/bus-departures` — [bus-departures.md](bus-departures.md) |
 | Migrations | `database/migrations/` (connection chosen via `env('DB_SHARED_DATABASE')` in many) |
 | Vue components | `resources/js/components/` |
+| Domain TS types | `resources/js/types/domain/index.ts` |
 | Invoice PDF view | `resources/views/invoices/pdf.blade.php` |
 | Config | `config/` |
 | Env | `.env` (gitignored), `.env.example` for reference |
