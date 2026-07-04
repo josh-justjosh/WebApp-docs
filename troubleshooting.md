@@ -192,3 +192,33 @@ Ensure [resources/js/types/domain/index.ts](../resources/js/types/domain/index.t
 docker compose exec app php artisan test --filter=QuotesAndSections
 docker compose exec app php artisan test --filter=InvoiceLineShowFlags
 ```
+
+## Docker and frontend build
+
+### `vite build` fails with `php: not found`
+
+You ran the build in a Node-only container. Wayfinder invokes `php artisan wayfinder:generate` during the build. Use the app container:
+
+```bash
+docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/node_modules /var/www/public/build"
+```
+
+Do **not** use `docker run … node:20-bookworm-slim` for this project.
+
+### Docker image rebuild hangs or freezes the VPS
+
+The slim [docker/Dockerfile](../docker/Dockerfile) no longer runs `npm ci`, `npm run build`, or `npx puppeteer browsers install chrome` at image build time. If you still see long stalls:
+
+- Prefer `docker compose build app` over `docker compose build --no-cache app`.
+- `--no-cache` recompiles PHP extensions and reinstalls ~250 Chromium/GTK apt packages; on a ~4 GB RAM host with no swap this can make SSH feel frozen for several minutes.
+
+### Invoice PDF preview returns null or 500
+
+Browsershot needs headless Chrome in the puppeteer cache volume:
+
+```bash
+docker compose exec app test -x /opt/puppeteer-cache/chrome/linux-*/chrome-linux64/chrome && echo ok || echo 'install chrome'
+docker compose exec -u root app sh -c "npx puppeteer browsers install chrome && chown -R www:www /opt/puppeteer-cache"
+```
+
+Ensure `PUPPETEER_CACHE_DIR=/opt/puppeteer-cache` is set in `docker-compose.yml` and the `webapp-*-puppeteer-cache` volume is mounted. See [deployment.md](deployment.md#6b-browsershot--puppeteer-chrome-one-time-per-environment).

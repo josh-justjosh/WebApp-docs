@@ -16,9 +16,18 @@ This document summarizes the project stack, runtime environment, and learned pat
 
 ## 2. Docker and paths
 
-- **Compose:** [docker-compose.yml](../docker-compose.yml) – app service builds from [docker/Dockerfile](../docker/Dockerfile), mounts `.` to `/var/www`, and uses named volumes for `storage`, `bootstrap/cache`, and shared storage.
-- **Vendor and build:** The Dockerfile does **not** run `composer install` or `npm run build`. It copies the repo (excluding `vendor/` and `node_modules/` via `.dockerignore`; both are bind-mounted at runtime). Run `composer install` and the frontend build at deploy time (see [deployment.md](deployment.md)).
-- **Invoice PDFs:** Generated with [Spatie Browsershot](https://github.com/spatie/browsershot) (Puppeteer/headless Chrome). Requires Node (in the app image), `puppeteer` in `package.json`, Chromium system libraries (installed in the Dockerfile), and a one-time `npx puppeteer browsers install chrome` into the `webapp-*-puppeteer-cache` volume. The Blade view `resources/views/invoices/pdf.blade.php` is rendered to HTML and passed to Browsershot for full CSS support. **Page numbers** (`Page X of Y`) use Browsershot’s Chrome footer template (`showBrowserHeaderAndFooter()` in [InvoicePdfService.php](../app/Services/InvoicePdfService.php)), not inline body HTML. Multi-page PDFs keep the business footer block (address, contact, notes) unsplit via print CSS and a small layout script — see [invoicing-quotes.md](invoicing-quotes.md#pdf-generation).
+- **Compose:** [docker-compose.yml](../docker-compose.yml) – app service builds from [docker/Dockerfile](../docker/Dockerfile), bind-mounts `.` → `/var/www`, and uses named volumes for `storage`, `bootstrap/cache`, shared storage, and **`webapp-*-puppeteer-cache`** → `/opt/puppeteer-cache` (Beta: `webapp-beta-puppeteer-cache`; Production: `webapp-puppeteer-cache`). `PUPPETEER_CACHE_DIR=/opt/puppeteer-cache` is set in compose.
+- **Image build (what the Dockerfile does *not* do):** The Dockerfile does **not** run `composer install`, `npm ci`, `npm run build`, or `npx puppeteer browsers install chrome`. Older images baked those in at build time (~3.5 GB, multi-minute `--no-cache` rebuilds that could hang a ~4 GB RAM VPS with no swap). The slim image (~2 GB) only installs PHP extensions, Node 20, Composer, and Chromium **system libraries**; app code is copied once (`COPY --chown=www:www`). `vendor/`, `node_modules/`, and `public/build/` are excluded via [`.dockerignore`](../.dockerignore) and come from the bind mount at runtime. Run Composer and the frontend build at **deploy** time (see [deployment.md](deployment.md)).
+- **Rebuild images:** Prefer `docker compose build app` (uses layer cache). Use `--no-cache` only when debugging a broken layer — it recompiles PHP extensions and reinstalls the full GTK/Chromium apt stack and can make the host unresponsive on low-memory VPSes.
+- **Frontend build (Vite):** Always build **inside the app container** — **not** `docker run node:20-bookworm-slim`. [`@laravel/vite-plugin-wayfinder`](../vite.config.ts) runs `php artisan wayfinder:generate --with-form` during `vite build`; a Node-only container fails with `php: not found`.
+  ```bash
+  docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/node_modules /var/www/public/build"
+  ```
+- **Invoice PDFs (Browsershot):** Generated with [Spatie Browsershot](https://github.com/spatie/browsershot) (Puppeteer/headless Chrome) for full CSS — see [invoicing-quotes.md](invoicing-quotes.md#pdf-generation). [InvoicePdfService.php](../app/Services/InvoicePdfService.php) renders [pdf.blade.php](../resources/views/invoices/pdf.blade.php) → HTML → PDF. **Why Chrome?** Browsershot drives a real headless Chrome binary via Puppeteer; PHP-only PDF libraries cannot reproduce the Blade/CSS layout (fonts, backgrounds, page footers). Runtime needs: Node in the app image, `puppeteer` in `package.json`, Chromium libs in the Dockerfile, and a **Chrome binary** in the puppeteer cache volume (installed once per environment, not baked into the image):
+  ```bash
+  docker compose exec -u root app sh -c "npx puppeteer browsers install chrome && chown -R www:www /opt/puppeteer-cache"
+  ```
+  Re-run after upgrading the `puppeteer` npm package or recreating the puppeteer volume. **Page numbers** (`Page X of Y`) use Browsershot’s Chrome footer template (`showBrowserHeaderAndFooter()`), not inline body HTML.
 - **Adding PHP packages / running Composer:** Composer is often **not installed on the host** (only inside the app container). Running `composer update` inside the app container (`docker compose exec app composer ...`) can also hit **permission denied** when writing `composer.lock` (container user `www` vs mount). Use a one-off Composer image with the project mounted so the lock and vendor are updated on the host:
   ```bash
   docker run --rm -v "$(pwd):/app" -w /app composer:latest composer update <package> --no-interaction
@@ -74,6 +83,7 @@ Full reference: [invoicing-quotes.md](invoicing-quotes.md).
 ## 7. Frontend (relevant to agents)
 
 - **Entry:** Inertia app bootstrapped from [resources/js/app.ts](../resources/js/app.ts); pages under `resources/js/pages/`. Built with **Vite** into `public/build`.
+- **Wayfinder:** [vite.config.ts](../vite.config.ts) uses `@laravel/vite-plugin-wayfinder` (`formVariants: true`). `npm run build` invokes `php artisan wayfinder:generate` — build in the **app container** (see §2), not a standalone Node image. Generated route/action TS lives under `resources/js/routes/` and `resources/js/actions/`.
 - **Tables:** `@tanstack/vue-table` is retained as a headless wrapper composing shadcn `Table` primitives — see [decisions/tanstack-vue-table.md](decisions/tanstack-vue-table.md).
 - **Invoice import UI:** [resources/js/components/invoices/InvoiceImportModal.vue](../resources/js/components/invoices/InvoiceImportModal.vue) – only a PDF file input and client selector; no manual fields (all from PDF). The Projects index page uses it and calls `POST /invoices/import` with FormData (file + client_id).
 - **Projects table:** [resources/js/pages/invoices/Index.vue](../resources/js/pages/invoices/Index.vue) uses [DataTable.vue](../resources/js/components/DataTable.vue) with `getRowHref` for row navigation and server pagination via `:paginator` + `pagination-only`.
@@ -86,7 +96,7 @@ Full reference: [invoicing-quotes.md](invoicing-quotes.md).
 - **Shared DB data vs code:** Migrations can be applied while **row data** in `mysql_shared` is empty or truncated (restore, failed sync, test pollution). Re-seed domain-specific data via the feature’s sync command (e.g. `php artisan rtt:sync-reference-data --all` for RTT reference tables). **Bus departures PTP display rules** live in `bus_service_display_rules` on the default DB — re-enter via the service modal after a restore that omitted that table.
 - **Git branches:** App code: develop on **`beta`**, merge **`beta` → `main`** for production. **`docs/`** is a **submodule** ([WebApp-docs](https://github.com/josh-justjosh/WebApp-docs)); commit and push documentation changes from the `docs` checkout, then bump the submodule pointer on `beta`/`main` in the WebApp repo. Relative links in this file (e.g. `../docker/Dockerfile`) assume this markdown lives at **`WebApp/docs/…`** inside the WebApp working tree; they do not resolve when browsing the docs repo alone on GitHub.
 - **Rule/validation with shared DB:** When using `Rule::exists()` for tables that may be on the shared connection, pass the **model class** (e.g. `Rule::exists(Client::class, 'id')`) so Laravel’s rule uses the model’s connection. Do not chain `->connection(...)` on `Rule::exists()` — that method does not exist on the Exists rule.
-- **Storage:** The default disk is used for invoice PDFs and similar; the named volume `webapp-beta-storage` is mounted at `/var/www/storage` so persisted files survive container recreation. Shared storage is mounted at `storage/app/public/shared` for cross-environment files.
+- **Storage:** The default disk is used for invoice PDFs and similar; the named volume `webapp-beta-storage` is mounted at `/var/www/storage` so persisted files survive container recreation. Shared storage is mounted at `storage/app/public/shared` for cross-environment files. Headless Chrome for Browsershot lives in the **`webapp-*-puppeteer-cache`** volume (not under the bind mount).
 - **Existing docs:** For deployment, Caddy, rollback, and runbooks, see [deployment.md](deployment.md) and [deploy-status.md](deploy-status.md). For Composer, PHP, and tests, see [troubleshooting.md](troubleshooting.md).
 
 ---
@@ -105,5 +115,6 @@ Full reference: [invoicing-quotes.md](invoicing-quotes.md).
 | Vue components | `resources/js/components/` |
 | Domain TS types | `resources/js/types/domain/index.ts` |
 | Invoice PDF view | `resources/views/invoices/pdf.blade.php` |
+| Puppeteer Chrome cache | `/opt/puppeteer-cache` (named volume; env `PUPPETEER_CACHE_DIR`) |
 | Config | `config/` |
 | Env | `.env` (gitignored), `.env.example` for reference |

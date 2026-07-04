@@ -54,6 +54,9 @@ cd beta
 docker compose ps
 docker compose exec app php artisan migrate
 
-# Rebuild frontend (from app directory; requires PHP for Wayfinder)
+# Rebuild frontend (from app directory; Wayfinder needs PHP — do not use node-only docker run)
 docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/node_modules /var/www/public/build"
+
+# One-time: headless Chrome for invoice PDFs (Browsershot)
+docker compose exec -u root app sh -c "npx puppeteer browsers install chrome && chown -R www:www /opt/puppeteer-cache"
 ```

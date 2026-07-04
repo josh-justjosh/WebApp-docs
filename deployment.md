@@ -84,11 +84,15 @@ Rebuild **only** if you changed:
 - Base PHP/extensions or system packages
 
 ```bash
-docker compose build --no-cache app
+docker compose build app
 docker compose up -d
 ```
 
-If you did **not** change the above, skip this step and keep the stack running.
+Prefer **`docker compose build app`** (layer cache). Avoid **`--no-cache`** unless you are fixing a broken image layer — on a low-memory VPS it recompiles PHP extensions, reinstalls the full Chromium/GTK apt stack, and can make the host appear hung for several minutes.
+
+If you added the puppeteer cache volume for the first time, run the [Browsershot Chrome step](#6b-browsershot--puppeteer-chrome-one-time-per-environment) once after `up -d`.
+
+If you did **not** change Dockerfile/compose/base packages, skip this step and keep the stack running.
 
 ### 4. Install or update PHP dependencies
 
@@ -109,7 +113,7 @@ Use `--force` in production so the command does not prompt.
 
 ### 6. Build frontend assets (Vite)
 
-Required after any change to JS, CSS, or Vite config so `public/build/` is up to date. Build **inside the app container** (PHP is required for `@laravel/vite-plugin-wayfinder`):
+Required after any change to JS, CSS, or Vite config so `public/build/` is up to date. Build **inside the app container** — [`@laravel/vite-plugin-wayfinder`](../vite.config.ts) runs `php artisan wayfinder:generate` during the build; a Node-only container (`docker run node:20-…`) fails with `php: not found`.
 
 ```bash
 docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/node_modules /var/www/public/build"
@@ -117,11 +121,13 @@ docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:w
 
 ### 6b. Browsershot / Puppeteer Chrome (one-time per environment)
 
-Invoice PDFs need headless Chrome in the `webapp-*-puppeteer-cache` volume. Run once after first deploy or when upgrading `puppeteer`:
+Invoice PDFs use [Browsershot](https://github.com/spatie/browsershot) (headless Chrome via Puppeteer). The app image includes Node and Chromium **libraries**; the **Chrome binary** (~340 MB) is stored in the `webapp-*-puppeteer-cache` volume, not baked into the image. Run once after first deploy, after adding the puppeteer volume, or when upgrading `puppeteer`:
 
 ```bash
 docker compose exec -u root app sh -c "npx puppeteer browsers install chrome && chown -R www:www /opt/puppeteer-cache"
 ```
+
+Verify: `docker compose exec app test -x /opt/puppeteer-cache/chrome/linux-*/chrome-linux64/chrome && echo ok`
 
 ### 7. Clear application caches
 

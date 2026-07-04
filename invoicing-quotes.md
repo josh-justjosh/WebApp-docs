@@ -48,7 +48,8 @@ Line **notes** are edited via the sticky-note button beside the description in t
 
 ## PDF generation
 
-- **Service:** [InvoicePdfService.php](../app/Services/InvoicePdfService.php) renders [pdf.blade.php](../resources/views/invoices/pdf.blade.php) → HTML → **Browsershot** (headless Chrome).
+- **Service:** [InvoicePdfService.php](../app/Services/InvoicePdfService.php) renders [pdf.blade.php](../resources/views/invoices/pdf.blade.php) → HTML → **Browsershot** (headless Chrome via Puppeteer).
+- **Why Chrome:** Full CSS fidelity (fonts, backgrounds, multi-page layout). The Chrome binary lives in `/opt/puppeteer-cache` (named Docker volume); install once per environment — see [deployment.md](deployment.md#6b-browsershot--puppeteer-chrome-one-time-per-environment).
 - **Quote vs invoice:** Heading (“Quote” / “Invoice”), meta labels, due/bank block (invoices only), PO on issued invoices, grand total placement.
 - **Project Date:** Header label for supply dates (not “Date of supply”).
 - **Single section:** Section titles hidden on PDF when only one section exists.
