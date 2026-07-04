@@ -6,9 +6,9 @@ This document summarizes the project stack, runtime environment, and learned pat
 
 ## 1. Stack overview
 
-- **Backend:** Laravel 12, Laravel Passport (API auth). The app image uses **PHP 8.4** (`php:8.4-fpm-bookworm` in [docker/Dockerfile](../docker/Dockerfile)).
+- **Backend:** Laravel 13, **Fortify** (session auth + 2FA), **Inertia** + Vue for staff UI. The app image uses **PHP 8.4** (`php:8.4-fpm-bookworm` in [docker/Dockerfile](../docker/Dockerfile)).
 - **PHP vs Composer on the host:** [`composer.json`](../composer.json) and [`composer.lock`](../composer.lock) declare **`php: ^8.2`** (Composer platform `^8.2`), so a host PHP 8.2+ can satisfy Composer. **Runtime in Docker is still 8.4**; prefer `docker compose exec app …` for Artisan and Composer so behaviour matches the image. If you run PHP on the VPS host, use **8.4** to match the container (e.g. [Sury PHP packages](https://packages.sury.org/php/) on Debian), not only “whatever satisfies ^8.2”.
-- **Frontend:** Vue (Laravel UI), Axios, SPA; built assets live in `public/build`.
+- **Frontend:** Vue 3 + Inertia (staff app via `resources/js/app.ts`), Vite; legacy standalone scoreboard pages use `resources/js/scoreboard.ts`. Built assets live in `public/build`.
 - **Runtime:** The app runs in Docker: PHP-FPM in container `webapp-beta-php` (see [docker-compose.yml](../docker-compose.yml); production may use different `container_name` values), project root mounted at `/var/www`. Nginx serves the app. Network Rail TD/TRUST ingest runs in the separate [`network-rail-data`](../../network-rail-data) stack (`feed-worker`, `nr-maintenance` on `webapp-shared`), not inside the beta app compose. That sibling path assumes the usual VPS layout (`app.jb/beta` next to `app.jb/network-rail-data`; the stack is not inside the WebApp git tree). It writes to MySQL schema `` `jb.app_network_rail` ``; Laravel reads/writes NR data via connection `mysql_network_rail` (`DB_NETWORK_RAIL_*` in `.env`).
 - **Docs:** [docs/README.md](README.md) indexes deployment, troubleshooting, and [td-trust.md](td-trust.md) (Network Rail STOMP feed / `network-rail-data`). This file is the agent-facing context.
 
@@ -17,8 +17,8 @@ This document summarizes the project stack, runtime environment, and learned pat
 ## 2. Docker and paths
 
 - **Compose:** [docker-compose.yml](../docker-compose.yml) – app service builds from [docker/Dockerfile](../docker/Dockerfile), mounts `.` to `/var/www`, and uses named volumes for `storage`, `bootstrap/cache`, and shared storage.
-- **Vendor and build:** The Dockerfile does **not** run `composer install`. It copies the repo (including `vendor/`) and runs `npm ci && npm run build`. So `vendor` is whatever exists on the host at build/copy time.
-- **Invoice PDFs:** Generated with [Spatie Browsershot](https://github.com/spatie/browsershot) (Puppeteer/headless Chrome). Requires Node, `puppeteer` in `package.json`, and Chromium system libraries (installed in the Dockerfile). The Blade view `resources/views/invoices/pdf.blade.php` is rendered to HTML and passed to Browsershot for full CSS support.
+- **Vendor and build:** The Dockerfile does **not** run `composer install` or `npm run build`. It copies the repo (excluding `vendor/` and `node_modules/` via `.dockerignore`; both are bind-mounted at runtime). Run `composer install` and the frontend build at deploy time (see [deployment.md](deployment.md)).
+- **Invoice PDFs:** Generated with [Spatie Browsershot](https://github.com/spatie/browsershot) (Puppeteer/headless Chrome). Requires Node (in the app image), `puppeteer` in `package.json`, Chromium system libraries (installed in the Dockerfile), and a one-time `npx puppeteer browsers install chrome` into the `webapp-*-puppeteer-cache` volume. The Blade view `resources/views/invoices/pdf.blade.php` is rendered to HTML and passed to Browsershot for full CSS support.
 - **Adding PHP packages / running Composer:** Composer is often **not installed on the host** (only inside the app container). Running `composer update` inside the app container (`docker compose exec app composer ...`) can also hit **permission denied** when writing `composer.lock` (container user `www` vs mount). Use a one-off Composer image with the project mounted so the lock and vendor are updated on the host:
   ```bash
   docker run --rm -v "$(pwd):/app" -w /app composer:latest composer update <package> --no-interaction
@@ -34,22 +34,24 @@ This document summarizes the project stack, runtime environment, and learned pat
 ## 3. Database
 
 - **Default:** Connection `mysql` uses `DB_*` (per-environment schema such as `laravel_beta` / `laravel_production` per `.env`). This is also where Laravel stores the **`migrations` table** for `php artisan migrate`.
-- **Shared DB:** If `DB_SHARED_DATABASE` is set, connection `mysql_shared` points at that schema (see [config/database.php](../config/database.php)). Tables such as `users`, `clients`, `invoices`, `invoice_lines`, `client_contacts`, and `signalling_diagrams` live there when models use `getConnectionName()` returning `mysql_shared` ([app/Models/Invoice.php](../app/Models/Invoice.php), [app/Models/Client.php](../app/Models/Client.php), [app/Models/SignallingDiagram.php](../app/Models/SignallingDiagram.php), etc.). Controllers that touch both connections in one transaction must pick the connection explicitly, e.g. [app/Http/Controllers/API/V1/InvoiceController.php](../app/Http/Controllers/API/V1/InvoiceController.php) uses `env('DB_SHARED_DATABASE') ? 'mysql_shared' : config('database.default')`.
+- **Shared DB:** If `DB_SHARED_DATABASE` is set, connection `mysql_shared` points at that schema (see [config/database.php](../config/database.php)). Tables such as `users`, `clients`, `invoices`, `invoice_lines`, `client_contacts`, `signalling_diagrams`, and `admin_audit_logs` live there when models use `getConnectionName()` returning `mysql_shared` ([app/Models/Invoice.php](../app/Models/Invoice.php), [app/Models/Client.php](../app/Models/Client.php), [app/Models/SignallingDiagram.php](../app/Models/SignallingDiagram.php), etc.). Code that writes audit rows or spans connections must pick the connection explicitly, e.g. `env('DB_SHARED_DATABASE') ? 'mysql_shared' : config('database.default')` (see [UserManagementController](../app/Http/Controllers/UserManagementController.php)).
 - **Migrations vs live DB:** `migrate` replays any migration missing from **`migrations` on the default DB**—not from `mysql_shared`. If shared tables already exist but those rows are missing (restore, clone, hand-edited DB), plain `migrate` can try to recreate tables or columns and fail. Many shared migrations use `Schema::hasTable` / `hasColumn` guards so a replay no-ops safely; Network Rail migrations are different (always use `--database=mysql_network_rail` **and** `--path` per `*network_rail*.php` file). Moving diagrams to shared: [`2026_04_12_100000_move_signalling_diagrams_to_mysql_shared.php`](../database/migrations/2026_04_12_100000_move_signalling_diagrams_to_mysql_shared.php) runs on the default migrate batch (not the NR `--path` loop); it copies or drops the per-app `signalling_diagrams` copy as needed.
 - **Network Rail (dedicated schema):** Connection `mysql_network_rail` points at database `` `jb.app_network_rail` `` (see `DB_NETWORK_RAIL_*` in `.env`). Models live under [app/Models/NetworkRail/](../app/Models/NetworkRail/) with `$connection = 'mysql_network_rail'`; tables use **short names** (`feed_messages`, `berths`, `berth_meanings`, `area_path_configs`, `signal_states`, etc.). STOMP ingest and retention/SMART jobs run only in [`network-rail-data`](../../network-rail-data); Laravel exposes read APIs and CRUD for berth meanings / area path configs—**no** HTTP feed ingest in PHP. NR migrations: run with `--database=mysql_network_rail` **and** `--path` per file matching `database/migrations/*network_rail*.php` (see [network-rail-data/README.md](../../network-rail-data/README.md)); do not run bare `migrate` on that connection without `--path` or Laravel may run unrelated migrations.
 
 ---
 
-## 4. API and auth
+## 4. Auth and HTTP routes
 
-- **Base:** Routes are under [routes/api.php](../routes/api.php); namespace `App\Http\Controllers\API\V1`. Most read/write routes use `middleware('auth:api')` (Passport).
+- **Staff (session):** Fortify login/logout/2FA; authenticated pages under [routes/staff.php](../routes/staff.php) and [routes/settings.php](../routes/settings.php) with Inertia controllers in `app/Http/Controllers/Web/`.
+- **Public OpenTrack scoreboard:** Token-gated JSON at `/public/opentrack/{OPENTRACK_PUBLIC_TOKEN}/…` ([PublicOpenTrackController](../app/Http/Controllers/Web/PublicOpenTrackController.php)); standalone scoreboard blades read the base URL from `<meta name="opentrack-public-api-base">`.
+- **API:** [routes/api.php](../routes/api.php) exposes only `GET /api/version` for health checks. Legacy `API/V1` controllers were removed; staff features use Inertia web routes.
 - **Exception handling:** [bootstrap/app.php](../bootstrap/app.php) – for `api/*` requests, exceptions render as JSON 500. If `app.debug` is true, the body includes message, error class, file, and line. If `app.debug` is false, `GET api/invoices/*/pdf/preview` still returns message, class, file, and line (to debug PDF rendering); other routes return a generic `"Server Error"` unless the exception is a `QueryException` / `PDOException` (then the DB message is included).
 
 ---
 
 ## 5. Invoice PDF import (learned behavior)
 
-- **Flow:** The user selects a PDF and a client in the UI; the frontend POSTs to `POST /api/invoices/import` with only `file` and `client_id`. The backend runs [InvoicePdfExtractionService](../app/Services/InvoicePdfExtractionService.php) to extract number, dates, total, subtotal, currency, line items, and notes; then creates the invoice and lines and stores the PDF under `invoices/{id}.pdf` (Storage).
+- **Flow:** The user selects a PDF and a client in the UI; the frontend POSTs to `POST /invoices/import (Inertia web route `invoices.import`)` with only `file` and `client_id`. The backend runs [InvoicePdfExtractionService](../app/Services/InvoicePdfExtractionService.php) to extract number, dates, total, subtotal, currency, line items, and notes; then creates the invoice and lines and stores the PDF under `invoices/{id}.pdf` (Storage).
 - **Parser:** Uses `smalot/pdfparser` (`Smalot\PdfParser\Parser`). The extraction service is **not** injected in the controller constructor; it is resolved lazily via `app(InvoicePdfExtractionService::class)` only inside `extract()` and `import()`. That way `GET /api/invoices` (and other routes that do not need PDF parsing) never load the Parser class, avoiding 500s when the package is missing or autoload has not been run yet.
 - **Supported PDF formats:** App-generated (from [resources/views/invoices/pdf.blade.php](../resources/views/invoices/pdf.blade.php)) and external/CB-0004-style (Invoice number, Date of issue, Due by, Qty/Description/Unit price/Total price, Total £). Extracted data is merged from both parsers where possible.
 
@@ -57,8 +59,9 @@ This document summarizes the project stack, runtime environment, and learned pat
 
 ## 6. Frontend (relevant to agents)
 
-- **Entry:** Laravel serves the SPA; the Vue app and routes live under `resources/js/` (e.g. [resources/js/App.vue](../resources/js/App.vue), [resources/js/routes.js](../resources/js/routes.js)). Built with **Vite** into `public/build`.
-- **Invoice import UI:** [resources/js/components/InvoiceImportModal.vue](../resources/js/components/InvoiceImportModal.vue) – only a PDF file input and client selector; no manual fields (all from PDF). [resources/js/components/InvoicesList.vue](../resources/js/components/InvoicesList.vue) uses it and calls `POST /api/invoices/import` with FormData (file + client_id).
+- **Entry:** Inertia app bootstrapped from [resources/js/app.ts](../resources/js/app.ts); pages under `resources/js/pages/`. Built with **Vite** into `public/build`.
+- **Tables:** `@tanstack/vue-table` is retained as a headless wrapper composing shadcn `Table` primitives — see [decisions/tanstack-vue-table.md](decisions/tanstack-vue-table.md).
+- **Invoice import UI:** [resources/js/components/invoices/InvoiceImportModal.vue](../resources/js/components/invoices/InvoiceImportModal.vue) – only a PDF file input and client selector; no manual fields (all from PDF). The invoices index page uses it and calls `POST /invoices/import (Inertia web route `invoices.import`)` with FormData (file + client_id).
 
 ---
 
@@ -67,7 +70,7 @@ This document summarizes the project stack, runtime environment, and learned pat
 - **Git branches:** App code: develop on **`beta`**, merge **`beta` → `main`** for production. **`docs/`** is a **submodule** ([WebApp-docs](https://github.com/josh-justjosh/WebApp-docs)); commit and push documentation changes from the `docs` checkout, then bump the submodule pointer on `beta`/`main` in the WebApp repo. Relative links in this file (e.g. `../docker/Dockerfile`) assume this markdown lives at **`WebApp/docs/…`** inside the WebApp working tree; they do not resolve when browsing the docs repo alone on GitHub.
 - **Rule/validation with shared DB:** When using `Rule::exists()` for tables that may be on the shared connection, pass the **model class** (e.g. `Rule::exists(Client::class, 'id')`) so Laravel’s rule uses the model’s connection. Do not chain `->connection(...)` on `Rule::exists()` — that method does not exist on the Exists rule.
 - **Storage:** The default disk is used for invoice PDFs and similar; the named volume `webapp-beta-storage` is mounted at `/var/www/storage` so persisted files survive container recreation. Shared storage is mounted at `storage/app/public/shared` for cross-environment files.
-- **Existing docs:** For deployment, Caddy, rollback, and runbooks, see [deployment.md](deployment.md) and [deploy-status.md](deploy-status.md). For Passport keys, Composer, PHP, and tests, see [troubleshooting.md](troubleshooting.md).
+- **Existing docs:** For deployment, Caddy, rollback, and runbooks, see [deployment.md](deployment.md) and [deploy-status.md](deploy-status.md). For Composer, PHP, and tests, see [troubleshooting.md](troubleshooting.md).
 
 ---
 
@@ -75,7 +78,7 @@ This document summarizes the project stack, runtime environment, and learned pat
 
 | Area | Path |
 |------|------|
-| API controllers | `app/Http/Controllers/API/V1/` |
+| Web controllers | `app/Http/Controllers/Web/` (staff pages), `app/Http/Controllers/` (domain CRUD) |
 | Models | `app/Models/` (Invoice, InvoiceLine, Client, ClientContact, User, SignallingDiagram); Network Rail: `app/Models/NetworkRail/` (`mysql_network_rail`) |
 | Services | `app/Services/` (InvoicePdfService, InvoicePdfExtractionService, InvoiceDateService) |
 | Migrations | `database/migrations/` (connection chosen via `env('DB_SHARED_DATABASE')` in many) |

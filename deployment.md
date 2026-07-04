@@ -1,6 +1,6 @@
 # Deploying Updates to WebApp Production and Beta (Docker)
 
-This guide describes how to deploy code changes and updates to the Production and Beta Docker stacks for WebApp (Laravel + Vue, served via Nginx in Docker; public HTTPS via Caddy on the host).
+This guide describes how to deploy code changes and updates to the Production and Beta Docker stacks for WebApp (Laravel + Inertia/Vue staff UI, Fortify auth, served via Nginx in Docker; public HTTPS via Caddy on the host).
 
 For current status and URLs, see [deploy-status.md](deploy-status.md).
 
@@ -28,7 +28,7 @@ App code is mounted from the host in each directory, so many updates only need p
 ## Docker Compose and .env
 
 - **`docker-compose.yml`** is **committed** to the repo in each stack directory (`production/`, `beta/`, `db/`). It defines services, container names, ports, and volume names; it does not contain secrets. Do **not** add `docker-compose.yml` to `.gitignore`.
-- **App and DB config** (e.g. `APP_ENV`, `APP_URL`, `DB_DATABASE`, `DB_PASSWORD`) belong in **`.env`**. Copy from `.env.example` and set values per environment. Each stack has its own example: **production/.env.example** uses production defaults (`APP_ENV=production`, `APP_URL=https://app.josh.me.uk`, `DB_DATABASE=laravel_production`); **beta/.env.example** uses beta defaults (`APP_ENV=beta`, `APP_URL=https://app-beta.josh.me.uk`, `DB_DATABASE=laravel_beta`). Docker Compose reads `.env` and passes these into the containers; the defaults in `docker-compose.yml` are fallbacks only.
+- **App and DB config** (e.g. `APP_ENV`, `APP_URL`, `DB_DATABASE`, `DB_PASSWORD`, `OPENTRACK_PUBLIC_TOKEN`, `PASSWORD_2FA_REQUIRED`, `MAIL_SEND_USER_INVITES`) belong in **`.env`**. Copy from `.env.example` and set values per environment. Each stack has its own example: **production/.env.example** uses production defaults (`APP_ENV=production`, `APP_URL=https://app.josh.me.uk`, `DB_DATABASE=laravel_production`); **beta/.env.example** uses beta defaults (`APP_ENV=beta`, `APP_URL=https://app-beta.josh.me.uk`, `DB_DATABASE=laravel_beta`). Docker Compose reads `.env` and passes these into the containers; the defaults in `docker-compose.yml` are fallbacks only.
 - **`docker-compose.example.yml`** in each stack directory is a reference/template shown on GitHub. Use it to see the canonical layout or to create a local override; the real `docker-compose.yml` is the one in the repo.
 - **`docker-compose.yml`** is **not** committed (it is in `.gitignore`). In each app stack directory (`production/`, `beta/`), copy the template once: `cp docker-compose.example.yml docker-compose.yml`. You can then edit `docker-compose.yml` per environment (container names, ports, volumes) if needed. It does not contain secrets.
 - **App and DB config** (e.g. `APP_ENV`, `APP_URL`, `DB_DATABASE`, `DB_PASSWORD`) belong in **`.env`**. Copy from `.env.example` and set values per environment. Production typically uses `APP_ENV=production`, `APP_URL=https://app.josh.me.uk`, `DB_DATABASE=laravel_production` (or `laravel`); Beta uses `APP_ENV=beta`, `APP_URL=https://app-beta.josh.me.uk`, `DB_DATABASE=laravel_beta`. Docker Compose reads `.env` and passes these into the containers; the defaults in `docker-compose.yml` are fallbacks only.
@@ -109,16 +109,18 @@ Use `--force` in production so the command does not prompt.
 
 ### 6. Build frontend assets (Vite)
 
-Required after any change to JS, CSS, or Vite config so `public/build/` is up to date:
-
-```bash
-docker run --rm -v "$(pwd):/app" -w /app node:20-bookworm-slim sh -c "npm ci && npm run build"
-```
-
-Alternatively, build inside the app container and fix ownership:
+Required after any change to JS, CSS, or Vite config so `public/build/` is up to date. Build **inside the app container** (PHP is required for `@laravel/vite-plugin-wayfinder`):
 
 ```bash
 docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/node_modules /var/www/public/build"
+```
+
+### 6b. Browsershot / Puppeteer Chrome (one-time per environment)
+
+Invoice PDFs need headless Chrome in the `webapp-*-puppeteer-cache` volume. Run once after first deploy or when upgrading `puppeteer`:
+
+```bash
+docker compose exec -u root app sh -c "npx puppeteer browsers install chrome && chown -R www:www /opt/puppeteer-cache"
 ```
 
 ### 7. Clear application caches
@@ -160,7 +162,7 @@ Deploy the Beta stack from **beta/** using the same steps as Production, but aga
 3. Rebuild images only if Dockerfile/compose changed; otherwise skip.
 4. `docker compose exec -T -u root app composer install --no-interaction` and `chown -R www:www ...`
 5. `docker compose exec -T app php artisan migrate --force` (runs against `laravel_beta` on `webapp-db`)
-6. Build frontend: `docker run --rm -v "$(pwd):/app" -w /app node:20-bookworm-slim sh -c "npm ci && npm run build"`
+6. Build frontend: `docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/node_modules /var/www/public/build"`
 7. Clear caches and restart: `docker compose exec -T app php artisan config:clear && ... cache:clear` then `docker compose restart app`
 
 Verification: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8009/` → expect `200`. Public URL: https://app-beta.josh.me.uk
@@ -291,7 +293,7 @@ To copy all three reference tables in one step (same schema on source and target
 
 ## When to run one-time setup again
 
-The script `docker-setup.sh` is for **initial** setup (key:generate, migrate, db:seed, passport:install, storage:link). You do **not** need to run it on every deploy. Only re-run (or run its steps manually) if:
+The script `docker-setup.sh` is for **initial** setup (key:generate, migrate, db:seed, storage:link). You do **not** need to run it on every deploy. Only re-run (or run its steps manually) if:
 
 - You are deploying to a new environment, or
 - You have added a step that is not yet in the normal deploy flow (e.g. a new artisan command that must run once).
@@ -306,11 +308,22 @@ git checkout main && git pull
 docker compose exec -T -u root app composer install --no-interaction
 docker compose exec -T -u root app chown -R www:www /var/www/vendor /var/www/bootstrap/cache
 docker compose exec -T app php artisan migrate --force
-docker run --rm -v "$(pwd):/app" -w /app node:20-bookworm-slim sh -c "npm ci && npm run build"
+docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/node_modules /var/www/public/build"
 docker compose exec -T app php artisan config:clear && docker compose exec -T app php artisan cache:clear
 docker compose restart app
 curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8008/
 ```
+
+## Coordinated deploy and 2FA cutover
+
+Beta and production share the **`users`** table when `DB_SHARED_DATABASE` is set. After beta enforces Fortify 2FA, any user who confirms 2FA on beta has `two_factor_confirmed_at` set in that shared table. Production must run the same Fortify stack before those accounts can log in there with 2FA.
+
+**Recommended approach:**
+
+1. **Pre-cutover comms** — Tell all staff that login will require two-factor authentication immediately after the deploy window (no grace period when `PASSWORD_2FA_REQUIRED=true`). First login after cutover: verify email if needed → **Settings → Security** → enable 2FA before using the app.
+2. **Coordinated window** — Deploy beta and production in the **same maintenance window**, as close together as practical. Set `PASSWORD_2FA_REQUIRED=true` on both stacks before switching traffic or announcing completion.
+3. **Admin recovery** — Admins can reset another user’s 2FA from **Users** (logged to `admin_audit_logs` and `storage/logs`). Use this for lockouts after cutover.
+4. **Smoke test both URLs** after deploy; watch for login/2FA redirects, invoice PDF, and the public scoreboard.
 
 ## Rollback
 

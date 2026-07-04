@@ -10,7 +10,7 @@
 | Production stack (app, nginx) | ✅ Configured |
 | Beta stack (app, nginx) | ✅ Configured |
 | Network Rail data stack (`network-rail-data`: feed-worker, nr-maintenance on `webapp-shared`) | Per-host; see [network-rail-data/README.md](../../network-rail-data/README.md) |
-| Composer / Laravel (migrate, passport, storage:link) | Per-environment |
+| Composer / Laravel (migrate, storage:link) | Per-environment |
 | Vite frontend build (`public/build/`) | Per-environment |
 | App Production on port 8008 | Expect HTTP 200 |
 | App Beta on port 8009 | Expect HTTP 200 |
@@ -52,6 +52,6 @@ cd beta
 docker compose ps
 docker compose exec app php artisan migrate
 
-# Rebuild frontend (from app directory)
-docker run --rm -v "$(pwd):/app" -w /app node:20-bookworm-slim sh -c "npm ci && npm run build"
+# Rebuild frontend (from app directory; requires PHP for Wayfinder)
+docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/node_modules /var/www/public/build"
 ```
