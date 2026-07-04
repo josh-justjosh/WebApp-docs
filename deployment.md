@@ -21,18 +21,13 @@ App code is mounted from the host in each directory, so many updates only need p
 - `docker` and `docker compose` available
 - **WebAppDb stack running first** so the `webapp-shared` network and `webapp-db` container exist (see [Shared database stack (WebAppDb)](#shared-database-stack-webappdb))
 - This repo (or a clone) with **production/** and **beta/** app stacks and **db/** for the shared database
-- `.env` configured in each app directory (database credentials, `APP_KEY`, `APP_URL`, etc.)
-- This repo (or a clone) with **production/** and **beta/** app stacks and **db/** for the shared database
-- In each app directory: `docker-compose.yml` (copy from `docker-compose.example.yml` if missing) and `.env` (database credentials, `APP_KEY`, `APP_URL`, etc.)
+- In each app directory: **`docker-compose.yml`** (copy from `docker-compose.example.yml` on first setup) and **`.env`** (database credentials, `APP_KEY`, `APP_URL`, etc.)
 
 ## Docker Compose and .env
 
-- **`docker-compose.yml`** is **committed** to the repo in each stack directory (`production/`, `beta/`, `db/`). It defines services, container names, ports, and volume names; it does not contain secrets. Do **not** add `docker-compose.yml` to `.gitignore`.
+- **`docker-compose.example.yml`** is **committed** in each stack directory (`production/`, `beta/`, `db/`). It defines services, container names, ports, and volume names; it does not contain secrets.
+- **`docker-compose.yml`** is **not** committed for app stacks (`production/`, `beta/`) — it is listed in `.gitignore`. On first setup (or a new host), copy the template once: `cp docker-compose.example.yml docker-compose.yml`. You can then edit `docker-compose.yml` per environment (container names, ports, volumes) if needed.
 - **App and DB config** (e.g. `APP_ENV`, `APP_URL`, `DB_DATABASE`, `DB_PASSWORD`, `OPENTRACK_PUBLIC_TOKEN`, `BUSTIMES_PUBLIC_TOKEN`, `PASSWORD_2FA_REQUIRED`, `MAIL_SEND_USER_INVITES`) belong in **`.env`**. Copy from `.env.example` and set values per environment. Each stack has its own example: **production/.env.example** uses production defaults (`APP_ENV=production`, `APP_URL=https://app.josh.me.uk`, `DB_DATABASE=laravel_production`); **beta/.env.example** uses beta defaults (`APP_ENV=beta`, `APP_URL=https://app-beta.josh.me.uk`, `DB_DATABASE=laravel_beta`). Docker Compose reads `.env` and passes these into the containers; the defaults in `docker-compose.yml` are fallbacks only.
-- **`docker-compose.example.yml`** in each stack directory is a reference/template shown on GitHub. Use it to see the canonical layout or to create a local override; the real `docker-compose.yml` is the one in the repo.
-- **`docker-compose.yml`** is **not** committed (it is in `.gitignore`). In each app stack directory (`production/`, `beta/`), copy the template once: `cp docker-compose.example.yml docker-compose.yml`. You can then edit `docker-compose.yml` per environment (container names, ports, volumes) if needed. It does not contain secrets.
-- **App and DB config** (e.g. `APP_ENV`, `APP_URL`, `DB_DATABASE`, `DB_PASSWORD`) belong in **`.env`**. Copy from `.env.example` and set values per environment. Production typically uses `APP_ENV=production`, `APP_URL=https://app.josh.me.uk`, `DB_DATABASE=laravel_production` (or `laravel`); Beta uses `APP_ENV=beta`, `APP_URL=https://app-beta.josh.me.uk`, `DB_DATABASE=laravel_beta`. Docker Compose reads `.env` and passes these into the containers; the defaults in `docker-compose.yml` are fallbacks only.
-- **`docker-compose.example.yml`** is committed as the template. Copy it to `docker-compose.yml` before first run (see above).
 
 ### Shared storage (Beta and Production)
 
@@ -164,7 +159,7 @@ docker compose up -d
 Deploy the Beta stack from **beta/** using the same steps as Production, but against the Beta branch and database:
 
 1. `cd beta`
-2. `git checkout develop` (or your beta branch name), then `git pull`
+2. `git checkout beta`, then `git pull origin beta`
 3. Rebuild images only if Dockerfile/compose changed; otherwise skip.
 4. `docker compose exec -T -u root app composer install --no-interaction` and `chown -R www:www ...`
 5. `docker compose exec -T app php artisan migrate --force` (runs against `laravel_beta` on `webapp-db`)
@@ -195,13 +190,17 @@ The app schedules `opentrack:refresh-scoreboard` every 2 minutes (see `bootstrap
 
 1. From the host (where Docker runs), add **two** cron entries so both Production and Beta run the Laravel scheduler every minute:
 
-   **Production:**
-   ```bash
-   **Production:** from the production directory, e.g.  
-   `* * * * * cd production && ./scripts/run-schedule.sh >> schedule.log 2>&1`
+   **Production** (from the production directory, e.g. `/var/www/app.jb/production`):
 
-   **Beta:** from the beta directory, e.g.  
-   `* * * * * cd beta && ./scripts/run-schedule-beta.sh >> schedule-beta.log 2>&1`
+   ```cron
+   * * * * * cd /var/www/app.jb/production && ./scripts/run-schedule.sh >> schedule.log 2>&1
+   ```
+
+   **Beta** (from the beta directory, e.g. `/var/www/app.jb/beta`):
+
+   ```cron
+   * * * * * cd /var/www/app.jb/beta && ./scripts/run-schedule-beta.sh >> schedule-beta.log 2>&1
+   ```
 
    Or with explicit `docker compose exec`: `cd production && docker compose exec -T app php artisan schedule:run ...` and for Beta: `cd beta && docker compose exec -T app php artisan schedule:run ...`.
 

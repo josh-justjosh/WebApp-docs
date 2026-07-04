@@ -22,12 +22,14 @@
 | Environment | Directory | Branch | URL |
 |-------------|-----------|--------|-----|
 | Production | `production/` | main | https://app.josh.me.uk, https://app.jb-vpn.uk |
-| Beta | `beta/` | develop (or beta branch) | https://app-beta.josh.me.uk |
+| Beta | `beta/` | `beta` | https://app-beta.josh.me.uk |
 | Database admin | `db/` | — | https://app-db.josh.me.uk (phpMyAdmin) |
 
 **Database names:** Production uses `laravel` when reusing the existing volume, or `laravel_production` on a fresh WebAppDb; Beta uses `laravel_beta`.
 
-**Verify branches:** From `production/` run `git branch --show-current` (expect `main`). From `beta/` run `git branch --show-current` (expect `develop` or your beta branch).
+**Verify branches:** From `production/` run `git branch --show-current` (expect `main`). From `beta/` run `git branch --show-current` (expect `beta`).
+
+**Ship beta to production:** merge `beta` → `main` in the WebApp repo (see [syncing-branches.md](syncing-branches.md)), then deploy from `production/` (see [deployment.md](deployment.md)).
 
 **Local checks:**
 - Production: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8008/` → 200
