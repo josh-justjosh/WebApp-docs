@@ -53,3 +53,103 @@ Use this when PHP is not on your PATH (e.g. on Windows) or to match the containe
 vendor/bin/phpunit --coverage-html reports/
 ```
 A `reports` directory has been created for code coverage report. Open the dashboard.html.
+
+## Realtime Trains (RTT)
+
+See [rtt-api.md](rtt-api.md) for full architecture. Common issues:
+
+### `/rtt` returns 404 or “API key not configured”
+
+Implementation files may exist without wiring. Confirm all of:
+
+- `config/services.php` has a `rtt` block
+- `routes/staff.php` registers four `/rtt` routes and imports `RttController`
+- `AppSidebar.vue` includes **RTT API** under Rail
+- `RTT_API_KEY` is set in `.env` (refresh token from [api-portal.rtt.io](https://api-portal.rtt.io))
+
+```bash
+docker compose exec app php artisan route:list --path=rtt
+docker compose exec app php artisan tinker --execute="echo config('services.rtt.api_key') ? 'key ok' : 'missing';"
+```
+
+### Reference data empty or truncated
+
+Tables live on **`mysql_shared`** when `DB_SHARED_DATABASE` is set. Re-sync:
+
+```bash
+docker compose exec app php artisan rtt:sync-reference-data --all
+```
+
+Check counts (shared connection):
+
+```bash
+docker compose exec app php artisan tinker --execute="
+\$c = DB::connection('mysql_shared');
+echo 'locations: '.\$c->table('rtt_ref_locations')->count().PHP_EOL;
+echo 'stops: '.\$c->table('rtt_ref_stops')->count().PHP_EOL;
+"
+```
+
+Expect ~12k locations and ~2.6k stops after a successful full sync.
+
+### RTT feature tests fail
+
+Tests use sqlite in-memory (`APP_ENV=testing`); RTT shared-DB migrations target `mysql` or `mysql_shared` depending on `DB_SHARED_DATABASE` at migrate time. Run:
+
+```bash
+docker compose exec app php artisan test --filter=Rtt
+```
+
+Failures mentioning `jb.app_beta.rtt_ref_*` or duplicate keys on `mysql_shared` usually mean the test DB setup does not match production shared-DB layout — see [rtt-api.md](rtt-api.md#tests). Do not run destructive sync or manual inserts against production shared DB while debugging tests.
+
+## Bus departures (bustimes.org)
+
+See [bus-departures.md](bus-departures.md) for full architecture. Common issues:
+
+### Missing Expected times on the board
+
+bustimes.org omits the **Expected** column when departures HTML is fetched with `date` and `time` query params. Live fetches must use `/stops/{atco}/departures` with no params (`BustimesService::fetchDeparturesHtml`). If Expected was missing after a deploy, clear departures cache:
+
+```bash
+docker compose exec app php artisan cache:clear
+```
+
+Cache version for departures is **`v3`** (`DEPARTURES_CACHE_VERSION` in `BustimesService`).
+
+### Via / destination not showing on public board
+
+Custom via and destination come from **`bus_service_display_rules`**, matched by service slug and upcoming PTP stop ATCO codes. They are configured in the staff service modal (**Board display rules**), not in board stop settings.
+
+If rules were lost after a DB restore:
+
+```bash
+docker compose exec app php artisan tinker --execute="echo App\Models\BusServiceDisplayRule::count();"
+```
+
+Re-create rules in the UI when count is zero. Board stop config (`settings` key `bus_departures`) is separate and may still be present.
+
+### Public poll 404 or “Public API is not configured”
+
+Confirm wiring and env:
+
+```bash
+docker compose exec app php artisan route:list --name=bus-departures
+docker compose exec app php artisan tinker --execute="echo config('services.bustimes.public_token') ?: 'missing';"
+```
+
+Public routes register only when `BUSTIMES_PUBLIC_TOKEN` is non-empty. The wall board reads `<meta name="bus-departures-public-api-base">` from `resources/views/layouts/bus-departures-board.blade.php`.
+
+### Staff page or service modal looks stale
+
+Rebuild frontend after Vue/TS changes:
+
+```bash
+docker compose exec -u root app sh -c "npm ci && npm run build && chown -R www:www /var/www/public/build"
+```
+
+### Tests
+
+```bash
+docker compose exec app php artisan test --filter=BusDepartures
+docker compose exec app php artisan test --filter=Bustimes
+```

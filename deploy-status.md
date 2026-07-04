@@ -33,6 +33,8 @@
 - Production: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8008/` → 200
 - Beta: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8009/` → 200
 
+**Feature URLs (Beta example):** Staff bus departures `/bus-departures`; public wall board `/d/bus-departures` (requires `BUSTIMES_PUBLIC_TOKEN` in `.env`). See [bus-departures.md](bus-departures.md).
+
 ## Useful commands
 
 ```bash
