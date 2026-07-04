@@ -11,4 +11,6 @@ Central documentation for the WebApp (Laravel + Vue) project: deployment, status
 - **[deploy-status.md](deploy-status.md)** – Current deploy status, URLs, and useful commands.
 - **[troubleshooting.md](troubleshooting.md)** – Composer, PHP, profile upload (413), unit tests.
 - **[td-trust.md](td-trust.md)** – Network Rail data stack (STOMP → MySQL; see [`network-rail-data`](../../network-rail-data)).
+- **[rtt-api.md](rtt-api.md)** – Realtime Trains API playground (`/rtt`), token storage, reference data sync, integration checklist.
+- **[bus-departures.md](bus-departures.md)** – bustimes.org departure boards, PTP display rules, public wall display, integration checklist.
 - **[caddy/Caddyfile](caddy/Caddyfile)** – Caddy reverse proxy and SSL config; copy to your Caddy config on the host.
