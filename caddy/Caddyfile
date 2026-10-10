@@ -1,16 +1,44 @@
 # Reverse proxy for WebApp Production, Beta, and phpMyAdmin.
 # Install Caddy on the host, then copy this file to your Caddy config and reload Caddy.
 # SSL certificates are obtained and renewed automatically by Caddy (Let's Encrypt).
+# Custom 5xx error pages: /var/www/html/errors/error.html (served via handle_errors snippet below).
+
+(error_pages) {
+	handle_errors {
+		@5xx expression {http.error.status_code} >= 500 && {http.error.status_code} < 600
+		rewrite @5xx /error.html
+		root * /var/www/html/errors
+		templates
+		file_server
+	}
+}
 
 app.josh.me.uk, app.jb-vpn.uk {
+	import error_pages
 	reverse_proxy 127.0.0.1:8008
 }
 
 app-beta.josh.me.uk {
+	import error_pages
 	reverse_proxy 127.0.0.1:8009
 }
 
+# GitHub webhook auto-deploy (beta + production; branch selects env)
+# DNS: hooks.josh.me.uk A → this VPS. Payload ref maps beta→beta stack, main→production.
+hooks.josh.me.uk {
+	handle /github-deploy {
+		reverse_proxy 127.0.0.1:9010
+	}
+	handle /health {
+		reverse_proxy 127.0.0.1:9010
+	}
+	handle {
+		respond "Not Found" 404
+	}
+}
+
 app-db.josh.me.uk {
+	import error_pages
 	reverse_proxy 127.0.0.1:8080
 	# Restrict phpMyAdmin access (uncomment and set user/password):
 	# basicauth /* {
@@ -20,6 +48,7 @@ app-db.josh.me.uk {
 
 # dsm.jb-vpn.uk – reverse proxy to Synology DSM (HTTPS, internal VPN)
 dsm.jb-vpn.uk {
+	import error_pages
 	reverse_proxy https://10.8.0.2:5001 {
 		transport http {
 			tls_insecure_skip_verify
@@ -36,6 +65,7 @@ dsm.jb-vpn.uk {
 # plex.jb-vpn.uk – reverse proxy to Plex on Synology
 # Do NOT set X-Plex-Token (or other X-Plex-*) via header_up — empty values break auth.
 plex.jb-vpn.uk {
+	import error_pages
 	reverse_proxy http://10.8.0.2:32400 {
 		transport http {
 			dial_timeout 15s
@@ -69,6 +99,7 @@ vps.jb-vpn.uk {
 
 # werbs-wiki.jb-vpn.uk – reverse proxy to Synology (port 8081)
 werbs-wiki.jb-vpn.uk {
+	import error_pages
 	reverse_proxy http://10.8.0.2:8081 {
 		header_up Host {host}
 		header_up X-Real-IP {remote}
@@ -81,6 +112,7 @@ werbs-wiki.jb-vpn.uk {
 
 # wiki.jb-vpn.uk – reverse proxy to Synology (port 8080)
 wiki.jb-vpn.uk {
+	import error_pages
 	reverse_proxy http://10.8.0.2:8080 {
 		header_up Host {host}
 		header_up X-Real-IP {remote}

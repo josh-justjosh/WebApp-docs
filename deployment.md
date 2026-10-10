@@ -15,6 +15,50 @@ Production and Beta each run as separate Docker Compose stacks **without** a loc
 
 App code is mounted from the host in each directory, so many updates only need pull + migrations + frontend build, without rebuilding images.
 
+## Auto-deploy (GitHub webhook)
+
+Pushes to GitHub can deploy automatically on this host:
+
+| Branch | Stack directory | Health port |
+|--------|-----------------|-------------|
+| `beta` | `beta/` | 8009 |
+| `main` | `production/` | 8008 |
+
+- **Webhook URL:** `https://hooks.josh.me.uk/github-deploy`
+- **Listener:** systemd unit `webapp-github-deploy.service` (Python on `127.0.0.1:9010`), proxied by Caddy on `hooks.josh.me.uk`
+- **Deploy script:** `/var/www/app.jb/scripts/deploy-env.sh beta|production`
+- **Secret:** `/etc/webapp-deploy/webhook.env` (`WEBHOOK_SECRET`) — not in git
+- **Logs:** `/var/log/webapp-deploy/beta.log` and `/var/log/webapp-deploy/production.log`
+
+### Skip rules (local development on beta)
+
+Auto-deploy **skips** (and logs) when:
+
+- The checkout working tree is **dirty** (uncommitted changes), or
+- The local branch is **ahead** of `origin/<branch>` (local commits not pushed)
+
+It **no-ops** when `HEAD` already matches `origin/<branch>`. Otherwise it fast-forward pulls and runs composer / migrate / `npm run build` / restart (and rebuilds the Docker image only if `docker/Dockerfile` or `docker-compose.example.yml` changed).
+
+Leave uncommitted edits on beta while developing; remote pushes will be skipped until the tree is clean and not ahead. Then the next push (or a manual script run) deploys.
+
+### Manual deploy
+
+```bash
+/var/www/app.jb/scripts/deploy-env.sh beta
+/var/www/app.jb/scripts/deploy-env.sh production
+```
+
+### Register the GitHub webhook (one-time)
+
+1. Repo **Settings → Webhooks → Add webhook** on `josh-justjosh/WebApp`.
+2. **Payload URL:** `https://hooks.josh.me.uk/github-deploy`
+3. **Content type:** `application/json`
+4. **Secret:** value of `WEBHOOK_SECRET` from `/etc/webapp-deploy/webhook.env` on the VPS (`grep WEBHOOK_SECRET /etc/webapp-deploy/webhook.env`).
+5. **Events:** Just the push event.
+6. Save. GitHub should receive a ping (`200` / `pong`). A push to `beta` or `main` should return `202` and append to the matching log under `/var/log/webapp-deploy/`.
+
+Service control: `systemctl status webapp-github-deploy` · `journalctl -u webapp-github-deploy -f`
+
 ## Prerequisites
 
 - SSH (or direct) access to the server where WebApp runs
@@ -352,6 +396,7 @@ SSL is handled by **Caddy** with **Let's Encrypt** (automatic issuance and renew
 |----------|--------------|
 | app.josh.me.uk, app.jb-vpn.uk | 127.0.0.1:8008 (Production) |
 | app-beta.josh.me.uk | 127.0.0.1:8009 (Beta) |
+| hooks.josh.me.uk | 127.0.0.1:9010 (GitHub auto-deploy webhook) |
 | app-db.josh.me.uk | 127.0.0.1:8080 (phpMyAdmin) |
 
 The Caddyfile lives in this docs repo at [caddy/Caddyfile](caddy/Caddyfile). To use it:
