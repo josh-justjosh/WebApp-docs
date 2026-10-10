@@ -360,6 +360,8 @@ The Caddyfile lives in this docs repo at [caddy/Caddyfile](caddy/Caddyfile). To 
 2. Copy the Caddyfile from this repo to the host: copy [caddy/Caddyfile](caddy/Caddyfile) to your Caddy config path on the host.
 3. Reload Caddy so it listens on 80/443 and proxies the hostnames to the ports above. Caddy will obtain and renew certificates automatically. The Caddyfile also includes blocks for dsm.jb-vpn.uk, plex.jb-vpn.uk, vps.jb-vpn.uk, wiki.jb-vpn.uk, werbs-wiki.jb-vpn.uk, and a default server.
 
+**Plex (`plex.jb-vpn.uk`):** Proxies to Plex on the Synology NAS at `10.8.0.2:32400` over the OpenVPN tunnel. Do **not** add `header_up X-Plex-*` lines to the Caddy Plex block — empty `X-Plex-Token` headers break library auth. On the Synology, set Plex **Custom server access URLs** to `https://plex.jb-vpn.uk:443` only. See the wiki: [Troubleshooting:Plex Troubleshooting](https://wiki.jb-vpn.uk/index.php/Troubleshooting:Plex_Troubleshooting).
+
 **Securing phpMyAdmin:** Restrict access to https://app-db.josh.me.uk (e.g. Caddy `basicauth`, IP allowlist, or VPN-only). See the commented `basicauth` block in [caddy/Caddyfile](caddy/Caddyfile).
 
 ---

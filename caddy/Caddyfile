@@ -34,21 +34,30 @@ dsm.jb-vpn.uk {
 }
 
 # plex.jb-vpn.uk – reverse proxy to Plex on Synology
+# Do NOT set X-Plex-Token (or other X-Plex-*) via header_up — empty values break auth.
 plex.jb-vpn.uk {
 	reverse_proxy http://10.8.0.2:32400 {
+		transport http {
+			dial_timeout 15s
+			response_header_timeout 60s
+			read_timeout 300s
+			write_timeout 300s
+		}
+		flush_interval -1
 		header_up Host {host}
-		header_up X-Real-IP {remote}
-		header_up X-Forwarded-For {remote}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}
-		header_up X-Plex-Client-Identifier {http.request.header.X-Plex-Client-Identifier}
-		header_up X-Plex-Device {http.request.header.X-Plex-Device}
-		header_up X-Plex-Product {http.request.header.X-Plex-Product}
-		header_up X-Plex-Version {http.request.header.X-Plex-Version}
-		header_up X-Plex-Platform {http.request.header.X-Plex-Platform}
-		header_up X-Plex-Platform-Version {http.request.header.X-Plex-Platform-Version}
-		header_up X-Plex-Device-Name {http.request.header.X-Plex-Device-Name}
-		header_up X-Plex-Provides {http.request.header.X-Plex-Provides}
-		header_up X-Plex-Token {http.request.header.X-Plex-Token}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Port {server_port}
+		header_up Upgrade {http.request.header.Upgrade}
+		header_up Connection {http.request.header.Connection}
+		header_down Location http://10.8.0.2:32400 https://plex.jb-vpn.uk
+		header_down Location https://10.8.0.2:32400 https://plex.jb-vpn.uk
+		header_down Location http://192.168.1.21:32400 https://plex.jb-vpn.uk
+		header_down Location https://192.168.1.21:32400 https://plex.jb-vpn.uk
+		header_down Location http://strawberrynas:32400 https://plex.jb-vpn.uk
+		header_down Location https://strawberrynas:32400 https://plex.jb-vpn.uk
 	}
 }
 

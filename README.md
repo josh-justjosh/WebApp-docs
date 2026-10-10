@@ -13,5 +13,6 @@ Central documentation for the WebApp (Laravel + Vue) project: deployment, status
 - **[td-trust.md](td-trust.md)** – Network Rail data stack (STOMP → MySQL; see [`network-rail-data`](../../network-rail-data)).
 - **[rtt-api.md](rtt-api.md)** – Realtime Trains API playground (`/rtt`), token storage, reference data sync, integration checklist.
 - **[bus-departures.md](bus-departures.md)** – bustimes.org departure boards, PTP display rules, public wall display, integration checklist.
+- **[pi-display-kiosk.md](pi-display-kiosk.md)** – Flash and configure a Raspberry Pi as a Displays Chromium kiosk.
 - **[invoicing-quotes.md](invoicing-quotes.md)** – Projects index, quote versioning, sections, PDF layout, routes checklist, deploy steps.
 - **[caddy/Caddyfile](caddy/Caddyfile)** – Caddy reverse proxy and SSL config; copy to your Caddy config on the host.

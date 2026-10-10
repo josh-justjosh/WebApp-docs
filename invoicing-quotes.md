@@ -13,8 +13,9 @@ Staff UI for **Projects** (`/invoices`) covers both invoices and versioned quote
 | `/quotes/{id}/edit` | Quote edit (creates new version if current is sent) |
 | `/invoices/{id}` | Invoice show |
 | `/invoices/{id}/edit` | Draft invoice edit |
+| `/currencies` | Currency picker visibility (hide from lists without affecting existing data) |
 
-Currency amounts display as **`£`** (not `GBP`) via `resources/js/lib/currency.ts`.
+Currency amounts display via `resources/js/lib/currency.ts` / `App\Support\Currencies` (GBP as **£**, other codes with their symbols). Each quote/invoice has a **Currency** field (default **GBP**). Clients have an optional **Default currency** that prefills new documents when a client is selected. Manage which currencies appear in pickers at `/currencies` (**Visible in list**); hiding a currency does not change existing clients or documents.
 
 ## Document model
 
@@ -52,7 +53,7 @@ Line **notes** are edited via the sticky-note button beside the description in t
 - **Why Chrome:** Full CSS fidelity (fonts, backgrounds, multi-page layout). The Chrome binary lives in `/opt/puppeteer-cache` (named Docker volume); install once per environment — see [deployment.md](deployment.md#6b-browsershot--puppeteer-chrome-one-time-per-environment).
 - **Quote vs invoice:** Heading (“Quote” / “Invoice”), meta labels, due/bank block (invoices only), PO on issued invoices, grand total placement.
 - **Project Date:** Header label for supply dates (not “Date of supply”).
-- **Single section:** Section titles hidden on PDF when only one section exists.
+- **Single section:** Section titles always print when set; the per-section `{title} total` row is omitted when only one section exists (document grand total still shows).
 - **Multi-page layout:**
   - Business footer (address, contact, footer note) uses `page-break-inside: avoid` and must not split across pages; positioned at bottom of last page via layout script.
   - **Page numbers** (`Page X of Y`) come from Browsershot’s Chrome footer template (`showBrowserHeaderAndFooter()`), not from body HTML — always at the bottom of every page.
@@ -71,6 +72,7 @@ Preview: `GET /quotes/{id}/pdf/preview` or `GET /invoices/{id}/pdf/preview`.
 | PDF service | `app/Services/InvoicePdfService.php` |
 | Section editor | `resources/js/components/invoices/SectionedLineEditor.vue` |
 | Forms | `resources/js/pages/invoices/Form.vue`, `resources/js/pages/quotes/Form.vue` |
+| Currencies | `resources/js/pages/currencies/Index.vue` (picker visibility) |
 | Show pages | `resources/js/pages/invoices/Show.vue`, `resources/js/pages/quotes/Show.vue` |
 | Index | `resources/js/pages/invoices/Index.vue` (Projects) |
 | Domain types | `resources/js/types/domain/index.ts` (`InvoiceRow`, `QuoteRow`, `InvoiceSection`, `InvoiceLine`) |

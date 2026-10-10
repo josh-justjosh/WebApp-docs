@@ -65,7 +65,7 @@ Implementation files may exist without wiring. Confirm all of:
 - `config/services.php` has a `rtt` block
 - `routes/staff.php` registers four `/rtt` routes and imports `RttController`
 - `AppSidebar.vue` includes **RTT API** under Rail
-- `RTT_API_KEY` is set in `.env` (refresh token from [api-portal.rtt.io](https://api-portal.rtt.io))
+- `RTT_API_KEY` is set in `.env` (refresh token from [api-portal.rtt.io](https://api-portal.rtt.io)); optional `RTT_SECONDARY_API_KEY` is preferred when set
 
 ```bash
 docker compose exec app php artisan route:list --path=rtt
@@ -74,23 +74,13 @@ docker compose exec app php artisan tinker --execute="echo config('services.rtt.
 
 ### Reference data empty or truncated
 
-Tables live on **`mysql_shared`** when `DB_SHARED_DATABASE` is set. Re-sync:
+Tables live on **`mysql_shared`** when `DB_SHARED_DATABASE` is set. Re-sync GitHub CSVs (also reloads station CRS codes and clears any persisted API location rows):
 
 ```bash
-docker compose exec app php artisan rtt:sync-reference-data --all
+docker compose exec app php artisan rtt:sync-reference-data
 ```
 
-Check counts (shared connection):
-
-```bash
-docker compose exec app php artisan tinker --execute="
-\$c = DB::connection('mysql_shared');
-echo 'locations: '.\$c->table('rtt_ref_locations')->count().PHP_EOL;
-echo 'stops: '.\$c->table('rtt_ref_stops')->count().PHP_EOL;
-"
-```
-
-Expect ~12k locations and ~2.6k stops after a successful full sync.
+API location catalogues are intentionally not stored (Hobbyist terms). Station CRS lookups use the GitHub stations CSV.
 
 ### RTT feature tests fail
 
@@ -118,7 +108,7 @@ Cache version for departures is **`v3`** (`DEPARTURES_CACHE_VERSION` in `Bustime
 
 ### Via / destination not showing on public board
 
-Custom via and destination come from **`bus_service_display_rules`**, matched by service slug and upcoming PTP stop ATCO codes. They are configured in the staff service modal (**Board display rules**), not in board stop settings.
+Custom via, destination, notes, and service line names come from **`bus_service_display_rules`**, matched by PTP stop ATCO codes, destination ATCO, destination text, service slug, and/or operator NOC. They are configured in the staff service modal (**Board display rules**) or on **Buses → Bus departures → Display rules**, not in board stop settings.
 
 If rules were lost after a DB restore:
 
