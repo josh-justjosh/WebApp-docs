@@ -118,14 +118,14 @@ Destination-text rules (`match_destination`) also apply to departures without jo
 
 Departures cache key version: **`v7`** (live fetch without date/time; includes `operatingDate` with post-midnight timetable-day normalisation; header-aware column mapping).
 
-## Display scene destination filter
+## Display scene filters
 
-Bus departure **display scenes** (playlists / wall displays) can optionally filter which services appear on the board by destination. This is configured per scene in **Displays → Scenes** and stored on `display_scenes.config`:
+Bus departure **display scenes** (playlists / wall displays) can optionally filter which departures appear on the board by per-stop service slug and/or destination. This is configured per scene in **Displays → Scenes** and stored on `display_scenes.config`:
 
 ```json
 {
   "stops": [
-    { "atco_code": "109000008742", "label": "Park Farm" },
+    { "atco_code": "109000008742", "label": "Park Farm", "serviceSlug": "ta-derby-allestree" },
     { "atco_code": "109000009000", "label": "University" }
   ],
   "destinationFilter": {
@@ -137,6 +137,20 @@ Bus departure **display scenes** (playlists / wall displays) can optionally filt
   }
 }
 ```
+
+### Per-stop service slug
+
+Each scene stop may include an optional `serviceSlug`. When set, only departures whose bustimes.org service slug matches (case-insensitive) are shown for that stop. When omitted or empty, all services at the stop are shown (destination and time-window filters still apply).
+
+The same ATCO may be listed more than once with different `serviceSlug` values; each board section filters independently before the combined board is merged.
+
+Filtering runs in `BustimesService::getBoardDataForStops()` immediately after each stop’s departures are fetched.
+
+| Field | Purpose |
+|-------|---------|
+| `stops[].serviceSlug` | Optional bustimes.org service slug. When set, only matching departures appear for that stop. |
+
+### Destination filter
 
 | Field | Purpose |
 |-------|---------|
