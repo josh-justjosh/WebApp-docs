@@ -84,7 +84,7 @@ Legacy single-stop config (`bus_departures.stop`) is still read if the new key i
 
 ## PTP display rules
 
-Board via/destination/notes text is stored in **`bus_service_display_rules`** (migration `2026_07_04_140000_create_bus_service_display_rules_table.php`, plus `notes` / destination ATCO / operator / `match_destination` column migrations):
+Board via/destination/notes text is stored in **`bus_service_display_rules`** on **mysql_shared** (migration `2026_07_04_140000_create_bus_service_display_rules_table.php`, plus `notes` / destination ATCO / operator / `match_destination` column migrations):
 
 | Column | Purpose |
 |--------|---------|
@@ -102,7 +102,7 @@ Rules are **global** — they match any service when upcoming PTP stops match in
 
 Staff UI supports **create**, **edit**, and **delete**. Journey/trip detail shows **source** and **display** values separately for destination, via, and notes.
 
-**Data loss note:** Rules live only in this table. They are not in bustimes.org or the `settings` table. Back up or export `bus_service_display_rules` when migrating environments.
+**Data loss note:** Rules, stop groups, and destination shortenings live on **mysql_shared** (`bus_service_display_rules`, `bus_stop_groups` / `bus_stop_group_members`, `bus_destination_shortenings`). They are not in bustimes.org or the `settings` table. Back up or export those tables when migrating environments.
 
 ## Board enrichment (live journeys)
 
@@ -207,7 +207,7 @@ When display text soft-wraps so a comma would be the last character on a line (f
 
 ## Custom stop groups
 
-Named groups of stop ATCO codes are stored in `bus_stop_groups` / `bus_stop_group_members` and referenced by a system-generated code starting with **`CG`** (for example `CGPARKFARMAREA` for “Park Farm area”). They behave like bustimes stations:
+Named groups of stop ATCO codes are stored in `bus_stop_groups` / `bus_stop_group_members` on **mysql_shared** and referenced by a system-generated code starting with **`CG`** (for example `CGPARKFARMAREA` for “Park Farm area”). They behave like bustimes stations:
 
 - **Boards / scenes** — departures from all member stops are merged and sorted
 - **Location lookup** — shows group name and member count
